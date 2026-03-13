@@ -1,0 +1,24 @@
+[0.378s] Invoking command in '/home/themountaintree/workspace/ROS_Unity_test/src/eeg_processing': PYTHONPATH=/home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/eeg_processing build --build-base /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/build install --record /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/install.log --single-version-externally-managed install_data
+[0.526s] running egg_info
+[0.527s] writing ../../build/eeg_processing/eeg_processing.egg-info/PKG-INFO
+[0.527s] writing dependency_links to ../../build/eeg_processing/eeg_processing.egg-info/dependency_links.txt
+[0.527s] writing entry points to ../../build/eeg_processing/eeg_processing.egg-info/entry_points.txt
+[0.527s] writing requirements to ../../build/eeg_processing/eeg_processing.egg-info/requires.txt
+[0.527s] writing top-level names to ../../build/eeg_processing/eeg_processing.egg-info/top_level.txt
+[0.529s] reading manifest file '../../build/eeg_processing/eeg_processing.egg-info/SOURCES.txt'
+[0.529s] writing manifest file '../../build/eeg_processing/eeg_processing.egg-info/SOURCES.txt'
+[0.529s] running build
+[0.529s] running build_py
+[0.529s] copying eeg_processing/CentralControllerNode.py -> /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+[0.530s] running install
+[0.530s] running install_lib
+[0.530s] copying /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing/CentralControllerNode.py -> /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+[0.531s] byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing/CentralControllerNode.py to CentralControllerNode.cpython-310.pyc
+[0.532s] running install_data
+[0.532s] running install_egg_info
+[0.533s] removing '/home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing-0.0.0-py3.10.egg-info' (and everything under it)
+[0.533s] Copying ../../build/eeg_processing/eeg_processing.egg-info to /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing-0.0.0-py3.10.egg-info
+[0.534s] running install_scripts
+[0.547s] Installing central_controller_node script to /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/eeg_processing
+[0.548s] writing list of installed files to '/home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/install.log'
+[0.564s] Invoked command in '/home/themountaintree/workspace/ROS_Unity_test/src/eeg_processing' returned '0': PYTHONPATH=/home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/eeg_processing build --build-base /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/build install --record /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/install.log --single-version-externally-managed install_data

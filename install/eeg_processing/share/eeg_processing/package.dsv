@@ -1,0 +1,6 @@
+source;share/eeg_processing/hook/pythonpath.ps1
+source;share/eeg_processing/hook/pythonpath.dsv
+source;share/eeg_processing/hook/pythonpath.sh
+source;share/eeg_processing/hook/ament_prefix_path.ps1
+source;share/eeg_processing/hook/ament_prefix_path.dsv
+source;share/eeg_processing/hook/ament_prefix_path.sh

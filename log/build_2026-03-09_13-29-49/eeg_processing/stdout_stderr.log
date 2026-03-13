@@ -1,0 +1,29 @@
+running egg_info
+writing ../../build/eeg_processing/eeg_processing.egg-info/PKG-INFO
+writing dependency_links to ../../build/eeg_processing/eeg_processing.egg-info/dependency_links.txt
+writing entry points to ../../build/eeg_processing/eeg_processing.egg-info/entry_points.txt
+writing requirements to ../../build/eeg_processing/eeg_processing.egg-info/requires.txt
+writing top-level names to ../../build/eeg_processing/eeg_processing.egg-info/top_level.txt
+reading manifest file '../../build/eeg_processing/eeg_processing.egg-info/SOURCES.txt'
+writing manifest file '../../build/eeg_processing/eeg_processing.egg-info/SOURCES.txt'
+running build
+running build_py
+copying eeg_processing/CentralControllerNode.py -> /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+copying eeg_processing/p300_processing_test.py -> /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+copying eeg_processing/p300_processing_test_online.py -> /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+running install
+running install_lib
+copying /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing/CentralControllerNode.py -> /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+copying /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing/p300_processing_test.py -> /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+copying /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing/p300_processing_test_online.py -> /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing/CentralControllerNode.py to CentralControllerNode.cpython-310.pyc
+byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing/p300_processing_test.py to p300_processing_test.cpython-310.pyc
+byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing/p300_processing_test_online.py to p300_processing_test_online.cpython-310.pyc
+running install_data
+copying package.xml -> /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/share/eeg_processing
+running install_egg_info
+removing '/home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing-0.0.0-py3.10.egg-info' (and everything under it)
+Copying ../../build/eeg_processing/eeg_processing.egg-info to /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing-0.0.0-py3.10.egg-info
+running install_scripts
+Installing central_controller_node script to /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/eeg_processing
+writing list of installed files to '/home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/install.log'

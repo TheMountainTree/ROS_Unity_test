@@ -1,0 +1,33 @@
+[0.440s] Invoking command in '/home/themountaintree/workspace/ROS_Unity_test/src/eeg_processing': PYTHONPATH=/home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/eeg_processing build --build-base /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/build install --record /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/install.log --single-version-externally-managed install_data
+[0.584s] running egg_info
+[0.584s] writing ../../build/eeg_processing/eeg_processing.egg-info/PKG-INFO
+[0.584s] writing dependency_links to ../../build/eeg_processing/eeg_processing.egg-info/dependency_links.txt
+[0.584s] writing entry points to ../../build/eeg_processing/eeg_processing.egg-info/entry_points.txt
+[0.584s] writing requirements to ../../build/eeg_processing/eeg_processing.egg-info/requires.txt
+[0.584s] writing top-level names to ../../build/eeg_processing/eeg_processing.egg-info/top_level.txt
+[0.586s] reading manifest file '../../build/eeg_processing/eeg_processing.egg-info/SOURCES.txt'
+[0.586s] writing manifest file '../../build/eeg_processing/eeg_processing.egg-info/SOURCES.txt'
+[0.587s] running build
+[0.587s] running build_py
+[0.587s] copying eeg_processing/ssvep_processing_test.py -> /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+[0.587s] copying eeg_processing/CentralControllerSSVEPNode.py -> /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+[0.587s] copying eeg_processing/CentrlControllerSSVEPNode2.py -> /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+[0.587s] running install
+[0.587s] running install_lib
+[0.588s] copying /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing/ssvep_processing_test.py -> /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+[0.588s] copying /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing/CentralControllerSSVEPNode.py -> /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+[0.588s] copying /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing/CentrlControllerSSVEPNode2.py -> /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+[0.588s] byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing/ssvep_processing_test.py to ssvep_processing_test.cpython-310.pyc
+[0.589s] byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing/CentralControllerSSVEPNode.py to CentralControllerSSVEPNode.cpython-310.pyc
+[0.591s] byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing/CentrlControllerSSVEPNode2.py to CentrlControllerSSVEPNode2.cpython-310.pyc
+[0.594s] running install_data
+[0.594s] running install_egg_info
+[0.595s] removing '/home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing-0.0.0-py3.10.egg-info' (and everything under it)
+[0.595s] Copying ../../build/eeg_processing/eeg_processing.egg-info to /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing-0.0.0-py3.10.egg-info
+[0.596s] running install_scripts
+[0.608s] Installing central_controller_node script to /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/eeg_processing
+[0.608s] Installing central_controller_ssvep_node script to /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/eeg_processing
+[0.608s] Installing central_controller_ssvep_node2 script to /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/eeg_processing
+[0.609s] Installing central_controller_ssvep_train_node script to /home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/eeg_processing
+[0.611s] writing list of installed files to '/home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/install.log'
+[0.625s] Invoked command in '/home/themountaintree/workspace/ROS_Unity_test/src/eeg_processing' returned '0': PYTHONPATH=/home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/themountaintree/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/eeg_processing build --build-base /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/build install --record /home/themountaintree/workspace/ROS_Unity_test/build/eeg_processing/install.log --single-version-externally-managed install_data

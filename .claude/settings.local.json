@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from metabci.brainda.algorithms.decomposition import cca; print\\(dir\\(cca\\)\\)\")",
+      "Bash(python src/eeg_processing/eeg_processing/ssvep_processing_fbcca.py)",
+      "Bash(python -c \"from metabci.brainda.algorithms.decomposition.cca import FBECCA; import inspect; print\\(inspect.signature\\(FBECCA.__init__\\)\\)\")",
+      "Bash(python -c \"from metabci.brainda.algorithms.decomposition.cca import FBECCA; import inspect; print\\(inspect.signature\\(FBECCA.fit\\)\\)\")",
+      "Bash(python -c \":*)"
+    ]
+  }
+}

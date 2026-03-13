@@ -1,0 +1,7 @@
+brainda
+numpy
+scipy
+setuptools
+
+[test]
+pytest

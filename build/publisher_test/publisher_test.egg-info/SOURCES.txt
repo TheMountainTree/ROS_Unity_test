@@ -1,0 +1,14 @@
+package.xml
+setup.cfg
+setup.py
+../../build/publisher_test/publisher_test.egg-info/PKG-INFO
+../../build/publisher_test/publisher_test.egg-info/SOURCES.txt
+../../build/publisher_test/publisher_test.egg-info/dependency_links.txt
+../../build/publisher_test/publisher_test.egg-info/entry_points.txt
+../../build/publisher_test/publisher_test.egg-info/requires.txt
+../../build/publisher_test/publisher_test.egg-info/top_level.txt
+../../build/publisher_test/publisher_test.egg-info/zip-safe
+publisher_test/__init__.py
+publisher_test/image_publisher.py
+publisher_test/seg_image_publisher.py
+resource/publisher_test

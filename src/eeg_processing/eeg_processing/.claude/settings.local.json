@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"from metabci.brainda.algorithms.decomposition import trca; print\\(dir\\(trca\\)\\)\")",
+      "Bash(python3 -c \"import metabci.brainda.algorithms as alg; print\\([x for x in dir\\(alg\\) if not x.startswith\\('_'\\)]\\)\")",
+      "Bash(python3 ssvep_processing_test.py 2>&1 | head -50)",
+      "Bash(python3 -m py_compile ssvep_processing_test.py && echo \"Syntax OK\")"
+    ]
+  }
+}

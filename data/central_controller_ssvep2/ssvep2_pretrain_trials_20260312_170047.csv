@@ -1,0 +1,2 @@
+trial_id,target_id,target_frequency_hz,cue_start_wall,stim_start_wall,stim_end_wall,trigger_received,trigger_wall
+1,2,10.000,2026-03-12T17:00:48.124,2026-03-12T17:00:50.144,2026-03-12T17:00:51.664,1,2026-03-12T17:00:50.264
