@@ -11,4 +11,5 @@ setup.py
 publisher_test/__init__.py
 publisher_test/image_publisher.py
 publisher_test/seg_image_publisher.py
+publisher_test/udp_sender_node.py
 resource/publisher_test

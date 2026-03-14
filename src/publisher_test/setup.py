@@ -25,6 +25,7 @@ setup(
         "console_scripts": [
             "image_publisher = publisher_test.image_publisher:main",
             "seg_image_publisher = publisher_test.seg_image_publisher:main",
+            "udp_sender_node = publisher_test.udp_sender_node:main",
         ],
     },
 )

@@ -1,0 +1,40 @@
+running egg_info
+creating ../../build/publisher_test/publisher_test.egg-info
+writing ../../build/publisher_test/publisher_test.egg-info/PKG-INFO
+writing dependency_links to ../../build/publisher_test/publisher_test.egg-info/dependency_links.txt
+writing entry points to ../../build/publisher_test/publisher_test.egg-info/entry_points.txt
+writing requirements to ../../build/publisher_test/publisher_test.egg-info/requires.txt
+writing top-level names to ../../build/publisher_test/publisher_test.egg-info/top_level.txt
+writing manifest file '../../build/publisher_test/publisher_test.egg-info/SOURCES.txt'
+reading manifest file '../../build/publisher_test/publisher_test.egg-info/SOURCES.txt'
+writing manifest file '../../build/publisher_test/publisher_test.egg-info/SOURCES.txt'
+running build
+running build_py
+creating /home/frank/workspace/ROS_Unity_test/build/publisher_test/build
+creating /home/frank/workspace/ROS_Unity_test/build/publisher_test/build/lib
+creating /home/frank/workspace/ROS_Unity_test/build/publisher_test/build/lib/publisher_test
+copying publisher_test/seg_image_publisher.py -> /home/frank/workspace/ROS_Unity_test/build/publisher_test/build/lib/publisher_test
+copying publisher_test/image_publisher.py -> /home/frank/workspace/ROS_Unity_test/build/publisher_test/build/lib/publisher_test
+copying publisher_test/__init__.py -> /home/frank/workspace/ROS_Unity_test/build/publisher_test/build/lib/publisher_test
+running install
+running install_lib
+creating /home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/python3.10/site-packages/publisher_test
+copying /home/frank/workspace/ROS_Unity_test/build/publisher_test/build/lib/publisher_test/seg_image_publisher.py -> /home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/python3.10/site-packages/publisher_test
+copying /home/frank/workspace/ROS_Unity_test/build/publisher_test/build/lib/publisher_test/image_publisher.py -> /home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/python3.10/site-packages/publisher_test
+copying /home/frank/workspace/ROS_Unity_test/build/publisher_test/build/lib/publisher_test/__init__.py -> /home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/python3.10/site-packages/publisher_test
+byte-compiling /home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/python3.10/site-packages/publisher_test/seg_image_publisher.py to seg_image_publisher.cpython-310.pyc
+byte-compiling /home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/python3.10/site-packages/publisher_test/image_publisher.py to image_publisher.cpython-310.pyc
+byte-compiling /home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/python3.10/site-packages/publisher_test/__init__.py to __init__.cpython-310.pyc
+running install_data
+creating /home/frank/workspace/ROS_Unity_test/install/publisher_test/share/ament_index
+creating /home/frank/workspace/ROS_Unity_test/install/publisher_test/share/ament_index/resource_index
+creating /home/frank/workspace/ROS_Unity_test/install/publisher_test/share/ament_index/resource_index/packages
+copying resource/publisher_test -> /home/frank/workspace/ROS_Unity_test/install/publisher_test/share/ament_index/resource_index/packages
+copying package.xml -> /home/frank/workspace/ROS_Unity_test/install/publisher_test/share/publisher_test
+creating /home/frank/workspace/ROS_Unity_test/install/publisher_test/share/publisher_test/launch
+running install_egg_info
+Copying ../../build/publisher_test/publisher_test.egg-info to /home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/python3.10/site-packages/publisher_test-0.0.1-py3.10.egg-info
+running install_scripts
+Installing image_publisher script to /home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/publisher_test
+Installing seg_image_publisher script to /home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/publisher_test
+writing list of installed files to '/home/frank/workspace/ROS_Unity_test/build/publisher_test/install.log'
