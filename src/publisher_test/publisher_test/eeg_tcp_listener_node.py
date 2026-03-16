@@ -31,6 +31,8 @@ class EegTcpClientNode(Node):
         self.declare_parameter("recv_buffer_size", 4096)
         self.declare_parameter("save_csv", True)
         self.declare_parameter("csv_relative_path", "data/eeg_tcp_stream.csv")
+        self.declare_parameter("eeg_sample_rate_hz", 1000.0)
+        self.declare_parameter("backlog_interp_threshold_frames", 40)
 
         self.server_ip = str(self.get_parameter("server_ip").value)
         self.server_port = int(self.get_parameter("server_port").value)
@@ -38,11 +40,19 @@ class EegTcpClientNode(Node):
         self.recv_buffer_size = int(self.get_parameter("recv_buffer_size").value)
         self.save_csv = bool(self.get_parameter("save_csv").value)
         self.csv_relative_path = str(self.get_parameter("csv_relative_path").value).strip()
+        self.eeg_sample_rate_hz = float(self.get_parameter("eeg_sample_rate_hz").value)
+        self.backlog_interp_threshold_frames = int(
+            self.get_parameter("backlog_interp_threshold_frames").value
+        )
 
         self.n_eeg_channels = len(self.CHANNEL_NAMES)
         self.frame_floats = self.n_eeg_channels + 1  # 8 EEG + 1 Trigger
         self.frame_bytes = self.frame_floats * 4     # 每个Float32占4字节，共36字节
         self.unpack_fmt = f"<{self.frame_floats}f"   # 小端序浮点数解包格式
+        if self.eeg_sample_rate_hz <= 0:
+            raise ValueError("eeg_sample_rate_hz must be > 0")
+        if self.backlog_interp_threshold_frames <= 0:
+            raise ValueError("backlog_interp_threshold_frames must be > 0")
 
         self.publisher_ = self.create_publisher(Float32MultiArray, topic_name, 100)
         self.csv_file = None
@@ -67,6 +77,7 @@ class EegTcpClientNode(Node):
         self.get_logger().info(f"Connecting to EEG TCP Server at {self.server_ip}:{self.server_port}...")
         try:
             self.sock.connect((self.server_ip, self.server_port))
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.get_logger().info("Connected successfully!")
         except Exception as e:
             self.get_logger().error(f"Failed to connect: {e}")
@@ -76,6 +87,8 @@ class EegTcpClientNode(Node):
 
         # 持久化接收缓存区（处理TCP粘包/半包的核心）
         self.buffer = bytearray()
+        self.frame_synced = False
+        self.backlog_warned = False
         
         self.timer = self.create_timer(0.01, self.poll_tcp)
 
@@ -84,18 +97,34 @@ class EegTcpClientNode(Node):
 
     def poll_tcp(self) -> None:
         try:
-            # 不断接收数据追加到缓存
-            chunk = self.sock.recv(self.recv_buffer_size)
-            if not chunk:
-                self.get_logger().warn("TCP connection closed by server.")
-                rclpy.shutdown()
-                return
-            self.buffer.extend(chunk)
+            # 尽量在一次轮询里读空内核接收缓冲，降低积压风险
+            while True:
+                chunk = self.sock.recv(self.recv_buffer_size)
+                if not chunk:
+                    self.get_logger().warn("TCP connection closed by server.")
+                    rclpy.shutdown()
+                    return
+                self.buffer.extend(chunk)
         except socket.timeout:
             pass  # 无新数据，直接去处理缓存区里的遗留数据
         except Exception as e:
             self.get_logger().error(f"TCP recv error: {e}")
             return
+
+        # 初始同步：滑动查找连续4个0x00，4字节末尾作为下一帧Byte0
+        if not self.frame_synced:
+            sync_pos = self.buffer.find(b"\x00\x00\x00\x00")
+            if sync_pos < 0:
+                # 保留末尾3字节，以便跨chunk匹配到4个0x00
+                if len(self.buffer) > 3:
+                    del self.buffer[:-3]
+                return
+
+            frame_start = sync_pos + 4
+            if frame_start > 0:
+                del self.buffer[:frame_start]
+            self.frame_synced = True
+            self.get_logger().info("TCP frame sync acquired (found 0x00000000 delimiter).")
 
         # 计算当前缓存区中包含多少个完整的帧
         num_complete_frames = len(self.buffer) // self.frame_bytes
@@ -103,11 +132,21 @@ class EegTcpClientNode(Node):
             return
 
         eeg_data_flat = []
-        
         now = time.time()
+        use_ts_interp = (
+            self.eeg_sample_rate_hz > 0
+            and num_complete_frames > 1
+        )
+
+        if use_ts_interp and not self.backlog_warned:
+            self.get_logger().warn(
+                "TCP frame backlog detected; enabling per-frame timestamp interpolation "
+                f"(frames_this_tick={num_complete_frames}, threshold={self.backlog_interp_threshold_frames})."
+            )
+            self.backlog_warned = True
 
         # 按精确的帧长度提取并解包
-        for _ in range(num_complete_frames):
+        for frame_idx in range(num_complete_frames):
             frame_raw = self.buffer[:self.frame_bytes]
             del self.buffer[:self.frame_bytes] # 从缓存中移除已读的字节
             
@@ -117,7 +156,12 @@ class EegTcpClientNode(Node):
             eeg_data_flat.extend(vals[:self.n_eeg_channels]) # 发布给ROS时只发EEG通道
             
             if self.csv_writer is not None:
-                row = [f"{now:.6f}"] + list(vals)
+                if use_ts_interp:
+                    # 以当前时刻作为最后一帧时间，按采样率反推本批次各帧时间
+                    ts = now - ((num_complete_frames - 1 - frame_idx) / self.eeg_sample_rate_hz)
+                else:
+                    ts = now
+                row = [f"{ts:.6f}"] + list(vals)
                 self.csv_writer.writerow(row)
 
         if self.csv_file is not None:
