@@ -1,0 +1,20 @@
+# ROS / colcon build files
+build/
+install/
+log/
+
+# ROS temporary files
+*.log
+
+# Python
+__pycache__/
+*.pyc
+
+# VSCode
+.vscode/
+
+# CLion
+.idea/
+
+# Linux
+.DS_Store
