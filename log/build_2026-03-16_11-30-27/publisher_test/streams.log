@@ -1,0 +1,27 @@
+[0.383s] Invoking command in '/home/frank/workspace/ROS_Unity_test/src/publisher_test': PYTHONPATH=/home/frank/workspace/ROS_Unity_test/build/publisher_test/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/publisher_test build --build-base /home/frank/workspace/ROS_Unity_test/build/publisher_test/build install --record /home/frank/workspace/ROS_Unity_test/build/publisher_test/install.log --single-version-externally-managed install_data
+[0.525s] running egg_info
+[0.525s] writing ../../build/publisher_test/publisher_test.egg-info/PKG-INFO
+[0.525s] writing dependency_links to ../../build/publisher_test/publisher_test.egg-info/dependency_links.txt
+[0.525s] writing entry points to ../../build/publisher_test/publisher_test.egg-info/entry_points.txt
+[0.525s] writing requirements to ../../build/publisher_test/publisher_test.egg-info/requires.txt
+[0.525s] writing top-level names to ../../build/publisher_test/publisher_test.egg-info/top_level.txt
+[0.527s] reading manifest file '../../build/publisher_test/publisher_test.egg-info/SOURCES.txt'
+[0.527s] writing manifest file '../../build/publisher_test/publisher_test.egg-info/SOURCES.txt'
+[0.527s] running build
+[0.527s] running build_py
+[0.528s] copying publisher_test/eeg_udp_listener_node.py -> /home/frank/workspace/ROS_Unity_test/build/publisher_test/build/lib/publisher_test
+[0.528s] running install
+[0.528s] running install_lib
+[0.529s] copying /home/frank/workspace/ROS_Unity_test/build/publisher_test/build/lib/publisher_test/eeg_udp_listener_node.py -> /home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/python3.10/site-packages/publisher_test
+[0.529s] byte-compiling /home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/python3.10/site-packages/publisher_test/eeg_udp_listener_node.py to eeg_udp_listener_node.cpython-310.pyc
+[0.530s] running install_data
+[0.530s] running install_egg_info
+[0.532s] removing '/home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/python3.10/site-packages/publisher_test-0.0.1-py3.10.egg-info' (and everything under it)
+[0.532s] Copying ../../build/publisher_test/publisher_test.egg-info to /home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/python3.10/site-packages/publisher_test-0.0.1-py3.10.egg-info
+[0.532s] running install_scripts
+[0.545s] Installing eeg_udp_listener_node script to /home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/publisher_test
+[0.545s] Installing image_publisher script to /home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/publisher_test
+[0.545s] Installing seg_image_publisher script to /home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/publisher_test
+[0.545s] Installing udp_sender_node script to /home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/publisher_test
+[0.545s] writing list of installed files to '/home/frank/workspace/ROS_Unity_test/build/publisher_test/install.log'
+[0.560s] Invoked command in '/home/frank/workspace/ROS_Unity_test/src/publisher_test' returned '0': PYTHONPATH=/home/frank/workspace/ROS_Unity_test/build/publisher_test/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/frank/workspace/ROS_Unity_test/install/publisher_test/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/publisher_test build --build-base /home/frank/workspace/ROS_Unity_test/build/publisher_test/build install --record /home/frank/workspace/ROS_Unity_test/build/publisher_test/install.log --single-version-externally-managed install_data

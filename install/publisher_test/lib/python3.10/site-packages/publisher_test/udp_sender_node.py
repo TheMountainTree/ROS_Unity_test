@@ -14,7 +14,7 @@ class UdpSenderNode(Node):
         self.declare_parameter("remote_ip", "192.168.56.3")
         self.declare_parameter("remote_port", 8888)
         self.declare_parameter("trigger_value", 1)
-        self.declare_parameter("auto_increment", False)
+        self.declare_parameter("auto_increment", True)
         self.declare_parameter("publish_hz", 2.0)
 
         local_ip = self.get_parameter("local_ip").value

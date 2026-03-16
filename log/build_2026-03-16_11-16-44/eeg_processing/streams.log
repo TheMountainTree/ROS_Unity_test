@@ -1,0 +1,68 @@
+[0.870s] Invoking command in '/home/frank/workspace/ROS_Unity_test/src/eeg_processing': PYTHONPATH=/home/frank/workspace/ROS_Unity_test/build/eeg_processing/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/eeg_processing build --build-base /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build install --record /home/frank/workspace/ROS_Unity_test/build/eeg_processing/install.log --single-version-externally-managed install_data
+[1.041s] running egg_info
+[1.042s] creating ../../build/eeg_processing/eeg_processing.egg-info
+[1.042s] writing ../../build/eeg_processing/eeg_processing.egg-info/PKG-INFO
+[1.042s] writing dependency_links to ../../build/eeg_processing/eeg_processing.egg-info/dependency_links.txt
+[1.042s] writing entry points to ../../build/eeg_processing/eeg_processing.egg-info/entry_points.txt
+[1.042s] writing requirements to ../../build/eeg_processing/eeg_processing.egg-info/requires.txt
+[1.042s] writing top-level names to ../../build/eeg_processing/eeg_processing.egg-info/top_level.txt
+[1.042s] writing manifest file '../../build/eeg_processing/eeg_processing.egg-info/SOURCES.txt'
+[1.043s] reading manifest file '../../build/eeg_processing/eeg_processing.egg-info/SOURCES.txt'
+[1.044s] writing manifest file '../../build/eeg_processing/eeg_processing.egg-info/SOURCES.txt'
+[1.044s] running build
+[1.044s] running build_py
+[1.044s] creating /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build
+[1.044s] creating /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib
+[1.044s] creating /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+[1.044s] copying eeg_processing/CentralControllerSSVEPNode.py -> /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+[1.044s] copying eeg_processing/ssvep_processing_fbcca.py -> /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+[1.044s] copying eeg_processing/p300_processing_test_online.py -> /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+[1.045s] copying eeg_processing/ssvep_processing_etrca.py -> /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+[1.045s] copying eeg_processing/ssvep_pipeline.py -> /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+[1.045s] copying eeg_processing/CentralControllerNode.py -> /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+[1.045s] copying eeg_processing/history_sender.py -> /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+[1.045s] copying eeg_processing/CentralControllerSSVEPNode2.py -> /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+[1.045s] copying eeg_processing/p300_processing_test.py -> /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+[1.045s] copying eeg_processing/CentralControllerSSVEPTrainNode.py -> /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+[1.045s] copying eeg_processing/__init__.py -> /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing
+[1.045s] running install
+[1.046s] running install_lib
+[1.046s] creating /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+[1.046s] copying /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing/CentralControllerSSVEPNode.py -> /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+[1.046s] copying /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing/ssvep_processing_fbcca.py -> /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+[1.047s] copying /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing/p300_processing_test_online.py -> /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+[1.047s] copying /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing/ssvep_processing_etrca.py -> /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+[1.047s] copying /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing/ssvep_pipeline.py -> /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+[1.047s] copying /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing/CentralControllerNode.py -> /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+[1.047s] copying /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing/history_sender.py -> /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+[1.047s] copying /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing/CentralControllerSSVEPNode2.py -> /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+[1.047s] copying /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing/p300_processing_test.py -> /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+[1.047s] copying /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing/CentralControllerSSVEPTrainNode.py -> /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+[1.047s] copying /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build/lib/eeg_processing/__init__.py -> /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing
+[1.048s] byte-compiling /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing/CentralControllerSSVEPNode.py to CentralControllerSSVEPNode.cpython-310.pyc
+[1.051s] byte-compiling /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing/ssvep_processing_fbcca.py to ssvep_processing_fbcca.cpython-310.pyc
+[1.054s] byte-compiling /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing/p300_processing_test_online.py to p300_processing_test_online.cpython-310.pyc
+[1.058s] byte-compiling /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing/ssvep_processing_etrca.py to ssvep_processing_etrca.cpython-310.pyc
+[1.058s] byte-compiling /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing/ssvep_pipeline.py to ssvep_pipeline.cpython-310.pyc
+[1.061s] byte-compiling /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing/CentralControllerNode.py to CentralControllerNode.cpython-310.pyc
+[1.063s] byte-compiling /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing/history_sender.py to history_sender.cpython-310.pyc
+[1.065s] byte-compiling /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing/CentralControllerSSVEPNode2.py to CentralControllerSSVEPNode2.cpython-310.pyc
+[1.070s] byte-compiling /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing/p300_processing_test.py to p300_processing_test.cpython-310.pyc
+[1.071s] byte-compiling /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing/CentralControllerSSVEPTrainNode.py to CentralControllerSSVEPTrainNode.cpython-310.pyc
+[1.074s] byte-compiling /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing/__init__.py to __init__.cpython-310.pyc
+[1.074s] running install_data
+[1.074s] creating /home/frank/workspace/ROS_Unity_test/install/eeg_processing/share/ament_index
+[1.074s] creating /home/frank/workspace/ROS_Unity_test/install/eeg_processing/share/ament_index/resource_index
+[1.074s] creating /home/frank/workspace/ROS_Unity_test/install/eeg_processing/share/ament_index/resource_index/packages
+[1.074s] copying resource/eeg_processing -> /home/frank/workspace/ROS_Unity_test/install/eeg_processing/share/ament_index/resource_index/packages
+[1.075s] copying package.xml -> /home/frank/workspace/ROS_Unity_test/install/eeg_processing/share/eeg_processing
+[1.075s] running install_egg_info
+[1.076s] Copying ../../build/eeg_processing/eeg_processing.egg-info to /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages/eeg_processing-0.0.0-py3.10.egg-info
+[1.076s] running install_scripts
+[1.092s] Installing central_controller_node script to /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/eeg_processing
+[1.092s] Installing central_controller_ssvep_node script to /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/eeg_processing
+[1.092s] Installing central_controller_ssvep_node2 script to /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/eeg_processing
+[1.092s] Installing central_controller_ssvep_train_node script to /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/eeg_processing
+[1.092s] Installing history_sender_node script to /home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/eeg_processing
+[1.092s] writing list of installed files to '/home/frank/workspace/ROS_Unity_test/build/eeg_processing/install.log'
+[1.117s] Invoked command in '/home/frank/workspace/ROS_Unity_test/src/eeg_processing' returned '0': PYTHONPATH=/home/frank/workspace/ROS_Unity_test/build/eeg_processing/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/frank/workspace/ROS_Unity_test/install/eeg_processing/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/eeg_processing build --build-base /home/frank/workspace/ROS_Unity_test/build/eeg_processing/build install --record /home/frank/workspace/ROS_Unity_test/build/eeg_processing/install.log --single-version-externally-managed install_data
