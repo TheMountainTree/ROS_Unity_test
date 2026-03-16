@@ -1,0 +1,72 @@
+[0.710s] Invoking command in '/home/themountaintree/workspace/ROS_Unity_test/src/ROS-TCP-Endpoint': PYTHONPATH=/home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/ros_tcp_endpoint build --build-base /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build install --record /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/install.log --install-scripts $base/lib/ros_tcp_endpoint --single-version-externally-managed install_data
+[0.841s] /usr/lib/python3/dist-packages/setuptools/dist.py:723: UserWarning: Usage of dash-separated 'script-dir' will not be supported in future versions. Please use the underscore name 'script_dir' instead
+[0.841s]   warnings.warn(
+[0.846s] running egg_info
+[0.846s] creating ../../build/ros_tcp_endpoint/ros_tcp_endpoint.egg-info
+[0.846s] writing ../../build/ros_tcp_endpoint/ros_tcp_endpoint.egg-info/PKG-INFO
+[0.846s] writing dependency_links to ../../build/ros_tcp_endpoint/ros_tcp_endpoint.egg-info/dependency_links.txt
+[0.846s] writing entry points to ../../build/ros_tcp_endpoint/ros_tcp_endpoint.egg-info/entry_points.txt
+[0.846s] writing requirements to ../../build/ros_tcp_endpoint/ros_tcp_endpoint.egg-info/requires.txt
+[0.846s] writing top-level names to ../../build/ros_tcp_endpoint/ros_tcp_endpoint.egg-info/top_level.txt
+[0.847s] writing manifest file '../../build/ros_tcp_endpoint/ros_tcp_endpoint.egg-info/SOURCES.txt'
+[0.848s] reading manifest file '../../build/ros_tcp_endpoint/ros_tcp_endpoint.egg-info/SOURCES.txt'
+[0.848s] adding license file 'LICENSE'
+[0.848s] writing manifest file '../../build/ros_tcp_endpoint/ros_tcp_endpoint.egg-info/SOURCES.txt'
+[0.848s] running build
+[0.848s] running build_py
+[0.848s] creating /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build
+[0.848s] creating /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib
+[0.848s] creating /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint
+[0.849s] copying ros_tcp_endpoint/subscriber.py -> /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint
+[0.849s] copying ros_tcp_endpoint/publisher.py -> /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint
+[0.849s] copying ros_tcp_endpoint/communication.py -> /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint
+[0.849s] copying ros_tcp_endpoint/unity_service.py -> /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint
+[0.849s] copying ros_tcp_endpoint/server.py -> /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint
+[0.849s] copying ros_tcp_endpoint/tcp_sender.py -> /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint
+[0.849s] copying ros_tcp_endpoint/service.py -> /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint
+[0.849s] copying ros_tcp_endpoint/exceptions.py -> /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint
+[0.849s] copying ros_tcp_endpoint/default_server_endpoint.py -> /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint
+[0.849s] copying ros_tcp_endpoint/thread_pauser.py -> /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint
+[0.849s] copying ros_tcp_endpoint/client.py -> /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint
+[0.849s] copying ros_tcp_endpoint/__init__.py -> /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint
+[0.850s] running install
+[0.850s] running install_lib
+[0.850s] creating /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint
+[0.850s] copying /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint/subscriber.py -> /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint
+[0.850s] copying /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint/publisher.py -> /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint
+[0.850s] copying /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint/communication.py -> /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint
+[0.850s] copying /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint/unity_service.py -> /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint
+[0.851s] copying /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint/server.py -> /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint
+[0.851s] copying /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint/tcp_sender.py -> /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint
+[0.851s] copying /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint/service.py -> /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint
+[0.851s] copying /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint/exceptions.py -> /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint
+[0.851s] copying /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint/default_server_endpoint.py -> /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint
+[0.851s] copying /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint/thread_pauser.py -> /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint
+[0.851s] copying /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint/client.py -> /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint
+[0.851s] copying /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build/lib/ros_tcp_endpoint/__init__.py -> /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint
+[0.851s] byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint/subscriber.py to subscriber.cpython-310.pyc
+[0.851s] byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint/publisher.py to publisher.cpython-310.pyc
+[0.851s] byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint/communication.py to communication.cpython-310.pyc
+[0.851s] byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint/unity_service.py to unity_service.cpython-310.pyc
+[0.852s] byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint/server.py to server.cpython-310.pyc
+[0.854s] byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint/tcp_sender.py to tcp_sender.cpython-310.pyc
+[0.855s] byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint/service.py to service.cpython-310.pyc
+[0.856s] byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint/exceptions.py to exceptions.cpython-310.pyc
+[0.856s] byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint/default_server_endpoint.py to default_server_endpoint.cpython-310.pyc
+[0.856s] byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint/thread_pauser.py to thread_pauser.cpython-310.pyc
+[0.856s] byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint/client.py to client.cpython-310.pyc
+[0.856s] byte-compiling /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint/__init__.py to __init__.cpython-310.pyc
+[0.856s] running install_data
+[0.856s] creating /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/share/ament_index
+[0.856s] creating /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/share/ament_index/resource_index
+[0.857s] creating /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/share/ament_index/resource_index/packages
+[0.857s] copying resource/ros_tcp_endpoint -> /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/share/ament_index/resource_index/packages
+[0.857s] copying package.xml -> /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/share/ros_tcp_endpoint
+[0.857s] creating /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/share/ros_tcp_endpoint/launch
+[0.857s] copying launch/endpoint.py -> /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/share/ros_tcp_endpoint/launch
+[0.857s] running install_egg_info
+[0.857s] Copying ../../build/ros_tcp_endpoint/ros_tcp_endpoint.egg-info to /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages/ros_tcp_endpoint-0.0.1-py3.10.egg-info
+[0.857s] running install_scripts
+[0.869s] Installing default_server_endpoint script to /home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/ros_tcp_endpoint
+[0.870s] writing list of installed files to '/home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/install.log'
+[0.887s] Invoked command in '/home/themountaintree/workspace/ROS_Unity_test/src/ROS-TCP-Endpoint' returned '0': PYTHONPATH=/home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/themountaintree/workspace/ROS_Unity_test/install/ros_tcp_endpoint/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/ros_tcp_endpoint build --build-base /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/build install --record /home/themountaintree/workspace/ROS_Unity_test/build/ros_tcp_endpoint/install.log --install-scripts $base/lib/ros_tcp_endpoint --single-version-externally-managed install_data
