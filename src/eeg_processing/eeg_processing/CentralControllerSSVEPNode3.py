@@ -278,7 +278,7 @@ class CentrlControllerSSVEPNode3(Node):
         )
         self.declare_parameter(
             "trigger_local_ip",
-            "0.0.0.0",
+            "192.168.56.103",
             descriptor=desc("发送到 Windows COM 转发器的 UDP trigger 本地绑定 IP。"),
         )
         self.declare_parameter(
@@ -323,7 +323,7 @@ class CentrlControllerSSVEPNode3(Node):
         )
         self.declare_parameter(
             "eeg_fs",
-            250.0,
+            1000.0,
             descriptor=desc("EEG 采样率（Hz）。"),
         )
 
@@ -554,8 +554,8 @@ class CentrlControllerSSVEPNode3(Node):
                 raise ValueError("pretrain_repetitions_per_target must be > 0")
             if self.eeg_n_channels <= 0:
                 raise ValueError("eeg_n_channels must be > 0")
-            if self.eeg_frame_floats < self.eeg_n_channels:
-                raise ValueError("eeg_frame_floats must be >= eeg_n_channels")
+            if self.eeg_frame_floats != self.eeg_n_channels + 1:
+                raise ValueError("eeg_frame_floats must equal eeg_n_channels + 1 (EEG + trigger)")
             if self.eeg_fs <= 0:
                 raise ValueError("eeg_fs must be > 0")
 
@@ -585,10 +585,11 @@ class CentrlControllerSSVEPNode3(Node):
                 fs=self.eeg_fs,
                 buffer_seconds=max(20.0, self.pretrain_stim_s * 8.0),
             )
-            self.target_samples = max(1, int(round(self.pretrain_stim_s * self.eeg_fs)))
             self.dataset_x: List[np.ndarray] = []
             self.dataset_y: List[int] = []
             self.dataset_saved = False
+            self.last_trigger_value = 0
+            self.epoch_start_pending = False
 
             self.pretrain_csv_path = os.path.join(
                 self.save_dir, f"ssvep3_pretrain_trials_{run_stamp}.csv"
@@ -609,9 +610,12 @@ class CentrlControllerSSVEPNode3(Node):
                     "stim_start_trigger_wall",
                     "stim_end_trigger_sent",
                     "stim_end_trigger_wall",
-                    "stim_start_abs",
-                    "stim_end_abs",
+                    "stim_enter_abs",
+                    "stim_exit_abs",
+                    "epoch_start_abs",
+                    "epoch_end_abs_inclusive",
                     "raw_samples",
+                    "epoch_complete",
                     "epoch_saved",
                 ]
             )
@@ -630,11 +634,10 @@ class CentrlControllerSSVEPNode3(Node):
                     "label",
                     "stim_start_wall",
                     "stim_end_wall",
-                    "stim_start_abs",
-                    "stim_end_abs",
-                    "raw_samples",
-                    "target_samples",
-                    "sample_adjustment",
+                    "epoch_start_abs",
+                    "epoch_end_abs_inclusive",
+                    "n_samples",
+                    "epoch_complete",
                 ]
             )
             self.pretrain_meta_csv_file.flush()
@@ -648,10 +651,14 @@ class CentrlControllerSSVEPNode3(Node):
             self.current_stim_end_trigger_sent = False
             self.current_stim_start_trigger_wall = ""
             self.current_stim_end_trigger_wall = ""
+            self.current_stim_enter_abs = -1
+            self.current_stim_exit_abs = -1
             self.current_stim_start_abs = -1
-            self.current_stim_end_abs = -1
+            self.current_stim_end_abs_inclusive = -1
             self.current_raw_samples = 0
+            self.current_epoch_complete = False
             self.current_epoch_saved = False
+            self.current_trial_record_written = False
 
             self._ensure_eeg_connected(force=True)
 
@@ -661,7 +668,7 @@ class CentrlControllerSSVEPNode3(Node):
                 f"cue={self.pretrain_cue_s:.2f}s, stim={self.pretrain_stim_s:.2f}s, rest={self.pretrain_rest_s:.2f}s, "
                 f"trigger_recv_udp={self.train_trigger_bind_ip}:{self.train_trigger_bind_port}, "
                 f"trigger_send_udp={self.trigger_local_ip}:{self.trigger_local_port}->{self.trigger_remote_ip}:{self.trigger_remote_port}, "
-                f"eeg_tcp={self.eeg_server_ip}:{self.eeg_server_port}, "
+                f"eeg_tcp={self.eeg_server_ip}:{self.eeg_server_port}, epoch_source=tcp_trigger_channel(1->2 inclusive), "
                 f"csv={self.pretrain_csv_path}, meta={self.pretrain_meta_csv_path}"
             )
 
@@ -932,13 +939,17 @@ class CentrlControllerSSVEPNode3(Node):
             return
 
         eeg_chunk = np.empty((self.eeg_n_channels, n_frames), dtype=np.float32)
+        trigger_values: List[int] = []
         for i in range(n_frames):
             start = i * self.eeg_frame_bytes
             end = start + self.eeg_frame_bytes
             vals = struct.unpack(self.eeg_unpack_fmt, self.eeg_tcp_buffer[start:end])
             eeg_chunk[:, i] = vals[: self.eeg_n_channels]
+            trigger_values.append(int(round(vals[self.eeg_n_channels])))
         del self.eeg_tcp_buffer[: n_frames * self.eeg_frame_bytes]
-        self.eeg_ring.append(eeg_chunk)
+        start_abs, _ = self.eeg_ring.append(eeg_chunk)
+        for i, trigger_value in enumerate(trigger_values):
+            self._process_eeg_trigger_sample(start_abs + i, trigger_value)
 
     def _send_trigger(self, value: int) -> Tuple[bool, str]:
         wall = datetime.now().isoformat(timespec="milliseconds")
@@ -950,37 +961,65 @@ class CentrlControllerSSVEPNode3(Node):
             self.get_logger().warning(f"send trigger {value} failed: {e}")
             return False, wall
 
-    def _normalize_epoch_samples(self, epoch: np.ndarray) -> Tuple[np.ndarray, str]:
-        x = np.asarray(epoch, dtype=np.float32)
-        n = x.shape[1]
-        if n == self.target_samples:
-            return x, "none"
-        if n > self.target_samples:
-            return x[:, : self.target_samples], "truncate"
-        out = np.zeros((self.eeg_n_channels, self.target_samples), dtype=np.float32)
-        out[:, :n] = x
-        return out, "pad"
+    def _process_eeg_trigger_sample(self, abs_index: int, trigger_value: int) -> None:
+        if trigger_value == self.last_trigger_value:
+            return
+
+        self.last_trigger_value = trigger_value
+        if self.state not in ("pretrain_stimulating", "pretrain_resting"):
+            return
+
+        if trigger_value == 1:
+            if self.current_epoch_complete:
+                self.get_logger().warning(
+                    f"[Trial {self.trial_idx}] ignore trigger=1 after completed epoch at abs={abs_index}"
+                )
+                return
+            if self.epoch_start_pending:
+                self.get_logger().warning(
+                    f"[Trial {self.trial_idx}] duplicate trigger=1 ignored at abs={abs_index}"
+                )
+                return
+            self.current_stim_start_abs = int(abs_index)
+            self.epoch_start_pending = True
+            return
+
+        if trigger_value == 2:
+            if not self.epoch_start_pending:
+                self.get_logger().warning(
+                    f"[Trial {self.trial_idx}] trigger=2 without open epoch at abs={abs_index}"
+                )
+                return
+            if self.current_epoch_complete:
+                self.get_logger().warning(
+                    f"[Trial {self.trial_idx}] duplicate trigger=2 ignored at abs={abs_index}"
+                )
+                return
+            self.current_stim_end_abs_inclusive = int(abs_index)
+            self.current_epoch_complete = True
+            self.epoch_start_pending = False
+            self._capture_pretrain_epoch()
 
     def _capture_pretrain_epoch(self) -> None:
         self.current_epoch_saved = False
-        if self.current_stim_start_abs < 0 or self.current_stim_end_abs <= self.current_stim_start_abs:
+        if self.current_stim_start_abs < 0 or self.current_stim_end_abs_inclusive < self.current_stim_start_abs:
             self.get_logger().warning(f"[Trial {self.trial_idx}] invalid epoch abs range")
             return
-        if not self.eeg_ring.has_range(self.current_stim_start_abs, self.current_stim_end_abs):
+        epoch_end_exclusive = self.current_stim_end_abs_inclusive + 1
+        if not self.eeg_ring.has_range(self.current_stim_start_abs, epoch_end_exclusive):
             self.get_logger().warning(
                 f"[Trial {self.trial_idx}] EEG range unavailable "
-                f"[{self.current_stim_start_abs}, {self.current_stim_end_abs})"
+                f"[{self.current_stim_start_abs}, {epoch_end_exclusive})"
             )
             return
         try:
-            raw = self.eeg_ring.get_range(self.current_stim_start_abs, self.current_stim_end_abs)
+            raw = self.eeg_ring.get_range(self.current_stim_start_abs, epoch_end_exclusive)
         except Exception as e:
             self.get_logger().warning(f"[Trial {self.trial_idx}] EEG epoch extraction failed: {e}")
             return
 
         self.current_raw_samples = int(raw.shape[1])
-        fixed, adjust = self._normalize_epoch_samples(raw)
-        self.dataset_x.append(fixed.astype(np.float32))
+        self.dataset_x.append(raw.astype(np.float32))
         self.dataset_y.append(int(self.current_target_id))
         self.current_epoch_saved = True
 
@@ -992,23 +1031,54 @@ class CentrlControllerSSVEPNode3(Node):
                 self.current_stim_start_wall,
                 self.current_stim_end_wall,
                 self.current_stim_start_abs,
-                self.current_stim_end_abs,
+                self.current_stim_end_abs_inclusive,
                 self.current_raw_samples,
-                self.target_samples,
-                adjust,
+                int(self.current_epoch_complete),
             ]
         )
         self.pretrain_meta_csv_file.flush()
+
+    def _write_pretrain_trial_row(self) -> None:
+        if self.current_trial_record_written:
+            return
+
+        self.pretrain_writer.writerow(
+            [
+                self.trial_idx,
+                self.current_target_id,
+                f"{self.current_freq_hz:.3f}",
+                self.current_cue_start_wall,
+                self.current_stim_start_wall,
+                self.current_stim_end_wall,
+                int(self.current_trigger_received),
+                self.current_trigger_wall,
+                int(self.current_stim_start_trigger_sent),
+                self.current_stim_start_trigger_wall,
+                int(self.current_stim_end_trigger_sent),
+                self.current_stim_end_trigger_wall,
+                self.current_stim_enter_abs,
+                self.current_stim_exit_abs,
+                self.current_stim_start_abs,
+                self.current_stim_end_abs_inclusive,
+                self.current_raw_samples,
+                int(self.current_epoch_complete),
+                int(self.current_epoch_saved),
+            ]
+        )
+        self.pretrain_csv_file.flush()
+        self.current_trial_record_written = True
 
     def _save_pretrain_dataset(self) -> None:
         if self.run_mode != "pretrain" or self.dataset_saved:
             return
         run_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         if self.dataset_x:
-            X = np.stack(self.dataset_x, axis=0).astype(np.float32)
+            X = np.empty(len(self.dataset_x), dtype=object)
+            for i, epoch in enumerate(self.dataset_x):
+                X[i] = epoch
             y = np.asarray(self.dataset_y, dtype=np.int32)
         else:
-            X = np.zeros((0, self.eeg_n_channels, self.target_samples), dtype=np.float32)
+            X = np.asarray([], dtype=object)
             y = np.zeros((0,), dtype=np.int32)
         save_path = os.path.join(self.save_dir, f"ssvep3_pretrain_dataset_{run_stamp}.npy")
         np.save(save_path, {"x": X, "y": y}, allow_pickle=True)
@@ -1068,6 +1138,7 @@ class CentrlControllerSSVEPNode3(Node):
 
     def _start_pretrain_trial(self) -> None:
         if self.trial_idx >= self.pretrain_total_trials:
+            self._write_pretrain_trial_row()
             self._save_pretrain_dataset()
             self._publish_pretrain_cmd("done", self.trial_idx, 0)
             self.state = "done"
@@ -1087,10 +1158,15 @@ class CentrlControllerSSVEPNode3(Node):
         self.current_stim_end_trigger_sent = False
         self.current_stim_start_trigger_wall = ""
         self.current_stim_end_trigger_wall = ""
+        self.current_stim_enter_abs = -1
+        self.current_stim_exit_abs = -1
         self.current_stim_start_abs = -1
-        self.current_stim_end_abs = -1
+        self.current_stim_end_abs_inclusive = -1
         self.current_raw_samples = 0
+        self.current_epoch_complete = False
         self.current_epoch_saved = False
+        self.epoch_start_pending = False
+        self.current_trial_record_written = False
 
         self._publish_pretrain_cmd("cue", self.trial_idx, self.current_target_id)
         self.state = "pretrain_cueing"
@@ -1098,7 +1174,7 @@ class CentrlControllerSSVEPNode3(Node):
 
     def _enter_pretrain_stim(self) -> None:
         self.current_stim_start_wall = datetime.now().isoformat(timespec="milliseconds")
-        self.current_stim_start_abs = self.eeg_ring.latest_abs_index
+        self.current_stim_enter_abs = self.eeg_ring.latest_abs_index
         self.current_stim_start_trigger_sent, self.current_stim_start_trigger_wall = self._send_trigger(1)
         self._publish_pretrain_cmd("stim", self.trial_idx, self.current_target_id)
         self.state = "pretrain_stimulating"
@@ -1106,32 +1182,9 @@ class CentrlControllerSSVEPNode3(Node):
 
     def _enter_pretrain_rest(self) -> None:
         self.current_stim_end_wall = datetime.now().isoformat(timespec="milliseconds")
-        self.current_stim_end_abs = self.eeg_ring.latest_abs_index
+        self.current_stim_exit_abs = self.eeg_ring.latest_abs_index
         self.current_stim_end_trigger_sent, self.current_stim_end_trigger_wall = self._send_trigger(2)
-        self._capture_pretrain_epoch()
         self._publish_pretrain_cmd("rest", self.trial_idx, self.current_target_id)
-
-        self.pretrain_writer.writerow(
-            [
-                self.trial_idx,
-                self.current_target_id,
-                f"{self.current_freq_hz:.3f}",
-                self.current_cue_start_wall,
-                self.current_stim_start_wall,
-                self.current_stim_end_wall,
-                int(self.current_trigger_received),
-                self.current_trigger_wall,
-                int(self.current_stim_start_trigger_sent),
-                self.current_stim_start_trigger_wall,
-                int(self.current_stim_end_trigger_sent),
-                self.current_stim_end_trigger_wall,
-                self.current_stim_start_abs,
-                self.current_stim_end_abs,
-                self.current_raw_samples,
-                int(self.current_epoch_saved),
-            ]
-        )
-        self.pretrain_csv_file.flush()
 
         self.state = "pretrain_resting"
         self.state_until = time.monotonic() + self.pretrain_rest_s
@@ -1257,6 +1310,7 @@ class CentrlControllerSSVEPNode3(Node):
 
         if self.state == "pretrain_resting":
             if now >= self.state_until:
+                self._write_pretrain_trial_row()
                 self._start_pretrain_trial()
             return
 
@@ -1264,6 +1318,8 @@ class CentrlControllerSSVEPNode3(Node):
     # 生命周期清理
     # ------------------------------------------------------------------
     def destroy_node(self):
+        if self.run_mode == "pretrain" and self.trial_idx > 0:
+            self._write_pretrain_trial_row()
         self._save_pretrain_dataset()
 
         for sock_name in ["decode_start_sock", "pretrain_trigger_sock", "trigger_send_sock", "eeg_tcp_sock"]:

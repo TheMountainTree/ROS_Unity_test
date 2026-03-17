@@ -1,0 +1,4 @@
+trial_id,target_id,label,stim_start_wall,stim_end_wall,stim_start_abs,stim_end_abs,raw_samples,target_samples,sample_adjustment
+1,5,5,2026-03-17T10:29:09.314,2026-03-17T10:29:10.834,3000,4520,1520,375,truncate
+2,4,4,2026-03-17T10:29:13.874,2026-03-17T10:29:15.394,7560,9080,1520,375,truncate
+3,8,8,2026-03-17T10:29:18.434,2026-03-17T10:29:19.954,12120,13640,1520,375,truncate

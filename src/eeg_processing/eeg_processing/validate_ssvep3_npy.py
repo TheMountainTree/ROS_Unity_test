@@ -6,6 +6,35 @@ from typing import Dict, Tuple
 import numpy as np
 
 
+def _convert_to_3d(x: np.ndarray) -> np.ndarray:
+    """Convert object array of 2D epochs to proper 3D numeric array.
+
+    If epochs have different sample counts, truncates to minimum length.
+    """
+    if x.ndim != 1 or x.dtype != object:
+        return x
+
+    epochs = [np.asarray(epoch, dtype=np.float64) for epoch in x]
+    shapes = [e.shape for e in epochs]
+
+    # Check if all shapes are the same
+    if len(set(shapes)) == 1:
+        return np.stack(epochs, axis=0)
+
+    # Different shapes - truncate to minimum length
+    n_channels_set = set(s[0] for s in shapes)
+    if len(n_channels_set) != 1:
+        raise ValueError(f"Inconsistent channel counts: {n_channels_set}")
+
+    n_channels = shapes[0][0]
+    min_samples = min(s[1] for s in shapes)
+    max_samples = max(s[1] for s in shapes)
+    print(f"Epochs have varying sample counts ({min_samples}-{max_samples}), truncating to {min_samples}")
+
+    truncated = [e[:, :min_samples] for e in epochs]
+    return np.stack(truncated, axis=0)
+
+
 def _load_dataset(path: Path) -> Dict[str, np.ndarray]:
     obj = np.load(path, allow_pickle=True)
     if isinstance(obj, np.ndarray) and obj.dtype == object and obj.shape == ():
@@ -22,6 +51,12 @@ def _load_dataset(path: Path) -> Dict[str, np.ndarray]:
 
     x = np.asarray(payload["x"])
     y = np.asarray(payload["y"])
+
+    # Auto-convert object array to 3D numeric array
+    if x.dtype == object:
+        print(f"Converting object array to 3D numeric array...")
+        x = _convert_to_3d(x)
+
     return {"x": x, "y": y}
 
 
@@ -38,10 +73,17 @@ def _check_dataset(x: np.ndarray, y: np.ndarray) -> Tuple[bool, str]:
         problems.append(f"channel count expected 8, got {x.shape[1]}")
     if x.size == 0 or y.size == 0:
         problems.append("dataset is empty")
-    if x.size > 0 and not np.isfinite(x).all():
-        problems.append("x contains NaN or Inf")
-    if y.size > 0 and not np.isfinite(y).all():
-        problems.append("y contains NaN or Inf")
+    # Only check finite for numeric dtypes
+    if x.size > 0 and np.issubdtype(x.dtype, np.number):
+        if not np.isfinite(x).all():
+            problems.append("x contains NaN or Inf")
+    elif x.size > 0:
+        problems.append(f"x has non-numeric dtype: {x.dtype}")
+    if y.size > 0 and np.issubdtype(y.dtype, np.number):
+        if not np.isfinite(y).all():
+            problems.append("y contains NaN or Inf")
+    elif y.size > 0:
+        problems.append(f"y has non-numeric dtype: {y.dtype}")
 
     ok = len(problems) == 0
     msg = "OK" if ok else " | ".join(problems)
@@ -57,7 +99,21 @@ def _print_summary(x: np.ndarray, y: np.ndarray) -> None:
         dist = ", ".join([f"{int(lbl)}:{int(cnt)}" for lbl, cnt in zip(labels, counts)])
         print(f"label distribution: {dist}")
 
-    if x.size > 0:
+    # Handle object arrays separately
+    if x.dtype == object and x.ndim == 1:
+        shapes = [e.shape if hasattr(e, 'shape') else 'N/A' for e in x]
+        unique_shapes = set(shapes)
+        if len(unique_shapes) == 1:
+            print(f"Each epoch shape: {shapes[0]}")
+        else:
+            print(f"Epoch shapes vary: {unique_shapes}")
+            print(f"  min samples: {min(s[1] if len(s) > 1 else 0 for s in shapes if isinstance(s, tuple))}")
+            print(f"  max samples: {max(s[1] if len(s) > 1 else 0 for s in shapes if isinstance(s, tuple))}")
+        # Compute stats across all epochs
+        all_data = np.concatenate([np.asarray(e).flatten() for e in x])
+        print(f"x min/max: {all_data.min():.6f} / {all_data.max():.6f}")
+        print(f"x mean/std: {all_data.mean():.6f} / {all_data.std():.6f}")
+    elif x.size > 0 and np.issubdtype(x.dtype, np.number):
         print(f"x min/max: {x.min():.6f} / {x.max():.6f}")
         print(f"x mean/std: {x.mean():.6f} / {x.std():.6f}")
 
@@ -183,6 +239,33 @@ def _plot_epochs(
         return
 
     print(f"Plotting {n_plot} epoch(s) to: {out_dir}")
+
+    # Handle object arrays
+    if x.dtype == object:
+        for ep in range(n_plot):
+            epoch_data = np.asarray(x[ep])
+            n_channels, n_samples = epoch_data.shape
+            fig, axes = plt.subplots(n_channels, 1, figsize=(12, 2 * n_channels), sharex=True)
+            fig.suptitle(f"Epoch {ep} | label={int(y[ep])}", fontsize=14)
+
+            t = np.arange(n_samples) / sample_rate if sample_rate > 0 else np.arange(n_samples)
+            for ch in range(n_channels):
+                ax = axes[ch] if n_channels > 1 else axes
+                ax.plot(t, epoch_data[ch, :], linewidth=0.8)
+                ax.set_ylabel(f"Ch{ch+1}")
+                ax.grid(alpha=0.25, linestyle="--")
+
+            (axes[-1] if n_channels > 1 else axes).set_xlabel("Time (s)" if sample_rate > 0 else "Sample")
+            fig.tight_layout(rect=[0, 0.02, 1, 0.98])
+            save_path = out_dir / f"epoch_{ep:03d}_label_{int(y[ep])}.png"
+            fig.savefig(save_path, dpi=120)
+            if show:
+                plt.show(block=False)
+                plt.pause(0.2)
+            plt.close(fig)
+        return
+
+    # Handle 3D numeric arrays
     for ep in range(n_plot):
         fig, axes = plt.subplots(8, 1, figsize=(12, 14), sharex=True)
         fig.suptitle(f"Epoch {ep} | label={int(y[ep])}", fontsize=14)
@@ -254,10 +337,12 @@ def main() -> None:
     ok, msg = _check_dataset(x, y)
     print(f"Validation: {msg}")
     _print_summary(x, y)
-    if args.diagnostic:
+    if args.diagnostic and x.ndim == 3:
         _run_diagnostic(x, args.sample_rate)
 
-    if x.ndim == 3 and y.ndim == 1 and x.shape[0] > 0:
+    # Plot if we have valid epochs (3D array or object array of epochs)
+    can_plot = (x.ndim == 3 and x.shape[0] > 0) or (x.dtype == object and x.shape[0] > 0)
+    if can_plot and y.ndim == 1 and x.shape[0] == y.shape[0]:
         out_dir = Path(args.out_dir).expanduser().resolve()
         _plot_epochs(
             x=x,
