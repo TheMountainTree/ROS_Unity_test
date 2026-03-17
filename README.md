@@ -31,7 +31,7 @@
 
 ### 主要子系统：
 1. **实验控制与状态机 (Central Controllers)** (`src/eeg_processing`):
-   - 核心节点主线为 `CentralControllerSSVEPNodeX.py`（最新迭代至 V3 版本）。
+   - 核心节点主线为 `CentralControllerSSVEPNodeX.py`（当前维护到 V4 版本）。
    - 负责管理实验生命周期（Trial 控制）、范式状态同步、数据记录，主要支持 `decode` (在线解码验证) 和 `pretrain` (离线模型训练数据采集) 两种模式。
 2. **数据采集与硬件抽象 (Data Acquisition)** (`src/publisher_test`):
    - `eeg_tcp_listener_node.py` 作为核心硬件接口，通过 TCP 监听脑电放大器（如 Neuracle 软件转发）的原始数据流。节点内部处理了 TCP 拆包/粘包逻辑，并将数据整合为 ROS2 的 `Float32MultiArray` 消息发布。
@@ -73,6 +73,9 @@ ros2 run publisher_test eeg_tcp_listener_node
 
 # 3. 启动 SSVEP 中心控制节点 (可配置 run_mode 为 pretrain 或 decode)
 ros2 run eeg_processing central_controller_ssvep_node3 --ros-args -p run_mode:=decode
+
+# 4. 启动 SSVEP Node4（decode/pretrain 均支持 EEG TCP + trigger + npy 保存）
+ros2 run eeg_processing central_controller_ssvep_node4 --ros-args -p run_mode:=decode
 ```
 
 ### 3. 测试与工具工具
@@ -104,7 +107,34 @@ ROS_Unity_test/
 系统经过高强度迭代（详见 `dev_logs/`）：
 1. **TCP 替代 UDP 接收**: 由于脑电采样率要求高，已废弃 UDP 脑电数据监听，全面升级为具有可靠粘包和缓存处理能力的 `eeg_tcp_listener_node`，保障了底层数据稳定。
 2. **Epoch 精准提取**: SSVEP V3 预训练节点废弃了“基于预设时间硬截断”的机制，重构为直接侦听 TCP 数据流内的 trigger 通道 (`trigger=1` 开始, `trigger=2` 结束)，完美解决了变长 Epoch 的网络时延导致的抖动问题。
-3. **多协议深度融合**: 完全确立了以 ROS Topic 为控制骨架，以 UDP 为低时延神经肌肉“韧带”的混合架构设计，并通过 `validate_ssvep3_npy.py` 等工具链完善了从采集到算法验证的全套闭环。
+3. **Decode EEG 采集闭环**: `CentralControllerSSVEPNode4.py` 将 decode 模式升级为可发送 trigger、接收 EEG TCP 数据、保存 decode `.npy` 数据集，并写出 decode EEG trial/meta CSV。
+4. **统一通信配置区**: `Node4` 将 decode / pretrain 共用的通信参数统一整理为共享配置区，复用 Unity UDP 回执、Windows trigger 转发、Windows EEG TCP 链路。
+5. **验证工具补全**: 除 `validate_ssvep3_npy.py` 外，新增 `validate_ssvep4_npy.py`，用于绘制 decode 阶段的 EEG epoch 图（默认单 epoch）。
+
+## Node4 通信配置速览
+`CentralControllerSSVEPNode4.py` 当前将以下链路作为统一共享通信配置：
+
+- Unity decode 回执 UDP：`decode_start_bind_ip` / `decode_start_port`
+- Unity pretrain 回执 UDP：`train_trigger_bind_ip` / `train_trigger_bind_port`
+- Windows trigger 转发：`trigger_local_ip` / `trigger_local_port` -> `trigger_remote_ip` / `trigger_remote_port`
+- Windows EEG TCP：`eeg_server_ip` / `eeg_server_port`
+- EEG 数据帧：`eeg_recv_buffer_size` / `eeg_n_channels` / `eeg_frame_floats` / `eeg_fs`
+
+默认主链路：
+- Ubuntu trigger 发送：`192.168.56.103:5006`
+- Windows COM 转发：`192.168.56.3:8888`
+- Windows EEG TCP：`192.168.56.3:8712`
+- Unity decode 回执：`0.0.0.0:10000`
+- Unity pretrain 回执：`0.0.0.0:10001`
+
+## 数据验证与绘图
+```bash
+# 验证 pretrain 数据集
+python3 src/eeg_processing/eeg_processing/validate_ssvep3_npy.py
+
+# 验证并绘制 decode 数据集（默认只画 1 个 epoch）
+python3 src/eeg_processing/eeg_processing/validate_ssvep4_npy.py
+```
 
 ## 协作与开发规范 (Contributing)
 - **代码规范**: Python 代码请严格遵循 PEP 8（推荐 4 空格缩进）并提供完整的 PEP 257 Docstring，支持使用 `ament_flake8` 和 `ament_pep257` 进行 Lint 检测。

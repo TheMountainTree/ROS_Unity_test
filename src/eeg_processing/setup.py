@@ -33,6 +33,7 @@ setup(
             "central_controller_ssvep_train_node = eeg_processing.CentralControllerSSVEPTrainNode:main",
             "central_controller_ssvep_node2 = eeg_processing.CentralControllerSSVEPNode2:main",
             "central_controller_ssvep_node3 = eeg_processing.CentralControllerSSVEPNode3:main",
+            "central_controller_ssvep_node4 = eeg_processing.CentralControllerSSVEPNode4:main",
             "history_sender_node = eeg_processing.history_sender:main",
         ],
     },
