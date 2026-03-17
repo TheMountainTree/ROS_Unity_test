@@ -27,6 +27,7 @@ setup(
             "seg_image_publisher = publisher_test.seg_image_publisher:main",
             "udp_sender_node = publisher_test.udp_sender_node:main",
             "eeg_tcp_listener_node = publisher_test.eeg_tcp_listener_node:main",
+            "reasoner_publish_test = publisher_test.reasoner_publish_test:main",
         ],
     },
 )

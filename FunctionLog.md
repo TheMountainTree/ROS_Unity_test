@@ -19,6 +19,17 @@
   * `class CircularEEGBuffer`: 用于在线数据的环形缓冲区。
   * `class CentrlControllerSSVEPNode3(Node)`: SSVEP 控制节点 v3，目前最先进的在线状态机。
   * `def main(args=None)`
+* **`CentralControllerSSVEPNode4.py`**
+  * `class CircularEEGBuffer`: 环形缓冲区，和 Node3 一样用于连续 EEG 样本缓存。
+  * `class CentrlControllerSSVEPNode4(Node)`: SSVEP 控制节点 v4，在 Node3 基础上为 decode 模式补齐 EEG TCP、trigger 打标、epoch 提取、`.npy` 保存，并把 decode/pretrain 的通信参数整理为统一配置区。
+  * 关键内部方法：
+    * `_load_common_config()`
+    * `_load_shared_comm_config()`
+    * `_init_trigger_sender()`
+    * `_init_eeg_streaming()`
+    * `_init_decode_ack_receiver()`
+    * `_init_pretrain_ack_receiver()`
+  * `def main(args=None)`
 * **`CentralControllerSSVEPTrainNode.py`**
   * `class CircularEEGBuffer`: 环形缓冲区。
   * `class PendingCapture`: 记录待处理的数据捕获任务。
@@ -68,6 +79,11 @@
   * `def main(args=None)`
 * **`validate_ssvep3_npy.py`**
   * 包含一系列数据验证函数：`_convert_to_3d`, `_load_dataset`, `_check_dataset`, `_print_summary`, `_dominant_freq`, `_run_diagnostic`, `_plot_epochs`。
+  * `def main()`
+* **`validate_ssvep4_npy.py`**
+  * 用于验证和可视化 `ssvep4_decode_dataset_*.npy`。
+  * 默认采样率 1000Hz，默认仅绘制 1 个 decode epoch。
+  * 主要函数：`_convert_to_3d`, `_load_dataset`, `_check_dataset`, `_print_summary`, `_dominant_freq`, `_run_diagnostic`, `_plot_epochs`。
   * `def main()`
 
 ---

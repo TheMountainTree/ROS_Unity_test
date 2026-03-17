@@ -1,5 +1,9 @@
 # Repository Guidelines
-
+## Self-update rule
+After major code changes, update this AGENTS.md to reflect:
+- architecture
+- conventions
+- dependencies
 ## Project Structure & Module Organization
 This repository is a ROS2 workspace for Unity-integrated BCI workflows.
 - `src/eeg_processing/`: core EEG/BCI logic (P300 + SSVEP controllers, decoding pipeline, model assets).

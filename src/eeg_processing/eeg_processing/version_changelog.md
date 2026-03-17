@@ -61,3 +61,39 @@
 1. **控制面板与显示面板各自实现了内聚统一**：Unity 显示端（C#）和 ROS 控制端（Python）现在都同时兼容并且原生内置 Decode + Pretrain 双工作模式。
 2. **职责纯粹化**：在 `CentrlControllerSSVEPNode2.py` 定型中，明确了“主控节点不要碰真实数据，只管发号施令与记录时序字典”，排除了繁重数据缓冲造成的调度卡顿。
 3. **算法箱封装就绪**：`ssvep_pipeline.py` 让所有复杂的信号数学过程退居幕后，上游 ROS 节点随时可以用两行代码将其调用。
+
+---
+
+## 📅 2026-03-18 增量：Reasoner 分组交互测试链路
+
+在原有 SSVEP 主线之外，本次新增了一套面向 Unity 上层交互验证的 reasoner 模式，核心文件为：
+
+- `publisher_test/reasoner_publish_test.py`
+- `eeg_processing/SSVEP_Communication_Node.py`
+- `HistoryManager.cs`（沿用现有协议）
+
+### 新增能力
+
+- **24 图 / 4 组批次发布**：`reasoner_publish_test.py` 从 `~/Pictures/截图` 中按自然排序取前 24 张图片，切成 4 组，每组 6 张。
+- **显式握手**：通信节点先发 `cmd=ssvep_ready`，reasoner 回 `cmd=reasoner_ready` 后才进入正常流程，解决两个节点启动顺序敏感的问题。
+- **参数注入式选择**：通过 `mock_selected_index` 模拟 EEG 已给出的用户选择结果。
+- **history 交互**：
+  - `0/1/2/4/5/6`：把对应槽位图片写入 `/history_image`
+  - `3`：把所有 history 图片打包回传给 reasoner
+  - `7`：删除最后一个 history，并回退到上一组 6 图
+
+### 关键修复
+
+- **history 缩略图尺寸修复**：reasoner 模式初版直接把 `640x480` 的主显示图发给 `/history_image`，导致 `HistoryManager.cs` 所在 ScrollView 布局被撑开。现已在 ROS 端统一缩放为 `100x100`，与原 `history_sender.py` 协议保持一致。
+- **槽位索引映射修复**：reasoner 模式初版仍然沿用 decode 里的随机 `shuffle`，导致 `mock_selected_index=0` 不一定对应屏幕 0 号槽位显示的那张图。现已在 reasoner 模式中关闭 shuffle，固定屏幕槽位与输入组顺序的一一对应关系。
+
+### 当前槽位定义
+
+```text
+0 1 2 3
+4 5 6 7
+```
+
+- `3`：勾
+- `7`：叉
+- 动态图片槽位：`0/1/2/4/5/6`

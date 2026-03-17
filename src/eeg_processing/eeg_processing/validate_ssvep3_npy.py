@@ -130,7 +130,7 @@ def _resolve_input_file(input_path: str) -> Path:
         raise FileNotFoundError(
             f"No input path provided and default dataset dir not found: {search_dir}"
         )
-    candidates = sorted(search_dir.glob("ssvep3_pretrain_dataset_*.npy"))
+    candidates = sorted(search_dir.glob("ssvep4_pretrain_dataset_*.npy"))
     if not candidates:
         raise FileNotFoundError(f"No dataset files in: {search_dir}")
     return candidates[-1]
