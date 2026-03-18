@@ -10,6 +10,7 @@
 - **位置**: `src/eeg_processing/`
 - **功能**: 管理实验范式的生命周期（如 Trial 的开始、刺激呈现、结束）、数据日志记录，以及与 Unity 端的状态同步。主要以`CentralControllerSSVEPNodeX.py`为主线，其他节点为辅助和测试节点。默认启动为decode模式，也可以使用参数声明为pretrain模式。该节点为核心节点，控制unity端闪烁和停止。
 - **演进**: 系统中存在多个版本的中心节点 (`CentralControllerNode`, `CentralControllerSSVEPNode`, `CentralControllerSSVEPNode2`, `CentralControllerSSVEPNode3`, `CentralControllerSSVEPNode4`, `CentralControllerSSVEPTrainNode`)，表明该系统经历了多轮迭代，支持不同复杂度或类型的 SSVEP/P300 实验范式（如在线解码、离线训练等）。主线是`CentralControllerSSVEPNodeX.py`
+- **演进**: 系统中存在多个版本的中心节点 (`CentralControllerNode`, `CentralControllerSSVEPNode`, `CentralControllerSSVEPNode2`, `CentralControllerSSVEPNode3`, `CentralControllerSSVEPNode4`, `CentralControllerSSVEPTrainNode`)，表明该系统经历了多轮迭代，支持不同复杂度或类型的 SSVEP/P300 实验范式（如在线解码、离线训练等）。主线是`CentralControllerSSVEPNodeX.py`
 - **decode**:通过发布话题 `/image_seg`（注意 ROS/OpenCV 的二维图像坐标系原点在左上角、Y 轴向下，而 Unity 原点在左下角、Y 轴向上，需要在发布前做垂直翻转），发布 6 张实际显示的图片。当 6 张图片接收完成后，Unity 类似`SSVEP_Stimulus2.cs`的脚本设置`isBatchCompleted = true`。
 接着 ROS 通过独立控制话题 `/ssvep_decode_cmd` 发布命令 `cmd=prepare`，Unity 接收后准备显示界面。随后 ROS 再通过 `/ssvep_decode_cmd` 发布 `cmd=stim`，Unity 检查 `isBatchCompleted == true` 后开始 SSVEP 闪烁，同时通过 UDP 发送 `trial_started={trial_id}` 到 ROS 端口 10000 确认 trial 开始。
 在 `CentralControllerSSVEPNode4.py` / `SSVEP_Communication_Node.py` 这类 decode 控制节点中，decode 模式会复用 pretrain 的 EEG 采集链路：进入 `decode_stimulating` 时 ROS 通过 UDP 向 Windows COM 转发器发送 `trigger 1`，停止刺激时发送 `trigger 2`，并通过 `/ssvep_decode_cmd` 发送 `cmd=stop`。Unity 侧此时停止闪烁，但保留当前 6 张图片继续显示，直到下一批图片覆盖；`cmd=done` 也沿用这一“停闪保留画面”的语义。Windows 侧 Neuracle TCP 转发流中的 trigger 通道用于闭合当前 decode epoch，最终除了图片槽位映射关系（mapping CSV）和 trial 元数据（trials CSV）外，还会额外保存 decode EEG 的 trial CSV、metadata CSV 和 `ssvep4_decode_dataset_*.npy`。
@@ -66,6 +67,7 @@
 - **Decode stop/done 语义**: `stop` 与 `done` 不再清空 decode 图片，也不立即隐藏 `stimulusPanel`；它们只负责停止闪烁，当前图片保持显示，直到下一轮图片覆盖。
 - **UDP 通信**: 针对具有极高时间敏感性的同步信号（Triggers）和控制指令，系统额外使用了 UDP 协议（常用端口如 9999, 10000, 12001），绕过 ROS2 的中间件开销，确保脑电打标(Marking)与视觉刺激的精确对齐（详见 `history_sender.py` 及 C# 侧的 `HistoryManager.cs`）。
 - **EEG TCP + Trigger 内嵌通道**: 当前 SSVEP 主线节点 (`Node3` pretrain, `Node4` decode/pretrain) 直接连接 Windows `8712` EEG TCP 服务，并以每采样点帧的最后一个 float32 作为 trigger 通道，从而按 `trigger=1 -> trigger=2` 精确切 epoch。Windows 端发送格式为 `Ch1(4B) -> Ch2(4B) -> ... -> ChN(4B) -> Trigger(4B) -> Next Ch1...`。
+- **EEG TCP + Trigger 内嵌通道**: 当前 SSVEP 主线节点 (`Node3` pretrain, `Node4` decode/pretrain) 直接连接 Windows `8712` EEG TCP 服务，并以每采样点帧的最后一个 float32 作为 trigger 通道，从而按 `trigger=1 -> trigger=2` 精确切 epoch。Windows 端发送格式为 `Ch1(4B) -> Ch2(4B) -> ... -> ChN(4B) -> Trigger(4B) -> Next Ch1...`。
 - **待测试和合并的脚本**:`history_sender_node` 是一个用于向 Unity 发送历史图片队列的辅助节点，主要用于在 Unity 界面上显示已选择/已操作的图片历史记录，并支持通过命令删除历史记录中的图片。
 节点启动后，通过定时器以 1 秒为间隔，从本地图片目录（默认 `~/workspace/eeg_robot/src/robot_ctr/graph/graph/results/segmentation_20260206_223629`）读取图片，经过垂直翻转（适配 Unity 坐标系）和统一尺寸调整（默认 100x100）后，发布到话题 `/history_image`。每张图片的 `frame_id` 携带唯一标识 `hist_id={image_id}`。最多发送 10 张图片后自动停止定时器。
 同时，节点订阅话题 `/history_control`，接收删除命令，并通过 UDP 发送 JSON 格式的控制指令到 `127.0.0.1:12001（Unity 端）`。支持的命令包括：
@@ -86,3 +88,4 @@
 - `eeg_processing`: 包含核心的业务逻辑，涵盖了实验流控制(Central Controller)、机器学习流水线(Pipelines)和部分与 Unity 交互的辅助工具。
 - `publisher_test`: 包含用于数据注入和测试的节点。除了 EEG 数据的 TCP 接收客户端外，还包含图像发布器 (`image_publisher.py`, `seg_image_publisher.py`) 和 UDP 发送器 (`udp_sender_node.py`)，通常用于模拟外部设备的输入。
 - `ROS-TCP-Endpoint`: 第三方/官方维护的桥接包，使 Unity 能够作为 ROS2 节点发送和接收消息。
+

@@ -32,6 +32,7 @@
 ### 主要子系统：
 1. **实验控制与状态机 (Central Controllers)** (`src/eeg_processing`):
    - 核心节点主线为 `CentralControllerSSVEPNodeX.py`（当前维护到 V4 版本）。
+   - 核心节点主线为 `CentralControllerSSVEPNodeX.py`（当前维护到 V4 版本）。
    - 负责管理实验生命周期（Trial 控制）、范式状态同步、数据记录，主要支持 `decode` (在线解码验证) 和 `pretrain` (离线模型训练数据采集) 两种模式。
 2. **数据采集与硬件抽象 (Data Acquisition)** (`src/publisher_test`):
    - `eeg_tcp_listener_node.py` 作为核心硬件接口，通过 TCP 监听脑电放大器（如 Neuracle 软件转发）的原始数据流。节点内部处理了 TCP 拆包/粘包逻辑，并将数据整合为 ROS2 的 `Float32MultiArray` 消息发布。
@@ -186,3 +187,4 @@ python3 src/eeg_processing/eeg_processing/validate_ssvep4_npy.py
 - **代码规范**: Python 代码请严格遵循 PEP 8（推荐 4 空格缩进）并提供完整的 PEP 257 Docstring，支持使用 `ament_flake8` 和 `ament_pep257` 进行 Lint 检测。
 - **提交规范 (Commit)**: 建议一功能一提交，Summary 需使用明确的动词/祈使句（中英皆可，例如 `eeg_processing: 重构 epoch 边界检测逻辑`）。
 - **测试框架**: 使用 `pytest`，测试代码存放在各 Package 下的 `test/` 文件夹中。提 PR 前请确保 `colcon test` 无报错。
+
