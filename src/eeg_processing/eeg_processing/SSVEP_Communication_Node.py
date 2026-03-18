@@ -160,6 +160,11 @@ class CentrlControllerSSVEPNode4(Node):
             descriptor=desc("训练控制指令话题（pretrain 模式，cmd=cue/stim/rest/done）。"),
         )
         self.declare_parameter(
+            "decode_command_topic",
+            "/ssvep_decode_cmd",
+            descriptor=desc("解码控制指令话题（decode 模式，cmd=prepare/stim/stop/done）。"),
+        )
+        self.declare_parameter(
             "use_reliable_qos",
             True,
             descriptor=desc("是否使用 RELIABLE QoS。"),
@@ -410,8 +415,9 @@ class CentrlControllerSSVEPNode4(Node):
             depth=10,
         )
 
-        # 解码模式使用 image_pub；预训练模式使用 command_pub。
+        # 解码图片、解码控制、预训练控制分别使用独立 topic。
         self.image_pub = self.create_publisher(Image, self.image_topic, qos)
+        self.decode_command_pub = self.create_publisher(Image, self.decode_command_topic, qos)
         self.command_pub = self.create_publisher(Image, self.command_topic, qos)
         self.history_pub = self.create_publisher(Image, self.history_image_topic, qos)
         self.reasoner_pub = self.create_publisher(Image, self.reasoner_output_topic, qos)
@@ -434,7 +440,8 @@ class CentrlControllerSSVEPNode4(Node):
         self.get_logger().info(
             "CentrlControllerSSVEPNode4 started: "
             f"mode={self.run_mode}, qos={'RELIABLE' if self.use_reliable_qos else 'BEST_EFFORT'}, "
-            f"image_topic={self.image_topic}, command_topic={self.command_topic}, save_dir={self.save_dir}"
+            f"image_topic={self.image_topic}, decode_command_topic={self.decode_command_topic}, "
+            f"command_topic={self.command_topic}, save_dir={self.save_dir}"
         )
 
     def _param_str(self, name: str) -> str:
@@ -464,6 +471,7 @@ class CentrlControllerSSVEPNode4(Node):
         self.topic_cfg = {
             "image_topic": self._param_str("image_topic"),
             "command_topic": self._param_str("command_topic"),
+            "decode_command_topic": self._param_str("decode_command_topic"),
             "reasoner_input_topic": self._param_str("reasoner_input_topic"),
             "reasoner_output_topic": self._param_str("reasoner_output_topic"),
             "history_image_topic": self._param_str("history_image_topic"),
@@ -479,6 +487,7 @@ class CentrlControllerSSVEPNode4(Node):
 
         self.image_topic = self.topic_cfg["image_topic"]
         self.command_topic = self.topic_cfg["command_topic"]
+        self.decode_command_topic = self.topic_cfg["decode_command_topic"]
         self.reasoner_input_topic = self.topic_cfg["reasoner_input_topic"]
         self.reasoner_output_topic = self.topic_cfg["reasoner_output_topic"]
         self.history_image_topic = self.topic_cfg["history_image_topic"]
@@ -1262,10 +1271,13 @@ class CentrlControllerSSVEPNode4(Node):
         msg.encoding = "bgr8"
         msg.step = 3
         msg.data = bytes([0, 0, 0])
-        self.image_pub.publish(msg)
+        self.decode_command_pub.publish(msg)
 
     def _publish_decode_stop(self, trial_id: int) -> None:
-        self._publish_decode_cmd("decode_stop", trial_id, self.current_target_id)
+        self._publish_decode_cmd("stop", trial_id, self.current_target_id)
+
+    def _publish_decode_done(self) -> None:
+        self._publish_decode_cmd("done", self.trial_idx, 0)
 
     def _prepare_decode_trial(self) -> None:
         if self.reasoner_mode_enabled:
@@ -1278,6 +1290,7 @@ class CentrlControllerSSVEPNode4(Node):
 
         if (not self.reasoner_mode_enabled) and self.decode_max_trials > 0 and self.trial_idx >= self.decode_max_trials:
             self.state = "done"
+            self._publish_decode_done()
             self._write_mode_trial_row()
             self._save_mode_dataset()
             self.get_logger().info("decode max_trials reached, stop scheduling")
@@ -1867,13 +1880,13 @@ class CentrlControllerSSVEPNode4(Node):
             if self.publish_idx >= self.decode_num_images:
                 self.state = "decode_hold"
                 self.decode_hold_until = now + max(0.0, self.decode_pre_stim_hold_s)
-                self._publish_decode_cmd("decode_prepare", self.trial_idx, self.current_target_id)
+                self._publish_decode_cmd("prepare", self.trial_idx, self.current_target_id)
             return
 
         if self.state == "decode_hold":
             if now < self.decode_hold_until:
                 return
-            self._publish_decode_cmd("decode_stim", self.trial_idx, self.current_target_id)
+            self._publish_decode_cmd("stim", self.trial_idx, self.current_target_id)
             self.state = "decode_wait_start"
             self.waiting_start_trial_id = self.trial_idx
             self.waiting_start_since = now

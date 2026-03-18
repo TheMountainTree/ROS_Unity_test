@@ -11,8 +11,8 @@
 - **功能**: 管理实验范式的生命周期（如 Trial 的开始、刺激呈现、结束）、数据日志记录，以及与 Unity 端的状态同步。主要以`CentralControllerSSVEPNodeX.py`为主线，其他节点为辅助和测试节点。默认启动为decode模式，也可以使用参数声明为pretrain模式。该节点为核心节点，控制unity端闪烁和停止。
 - **演进**: 系统中存在多个版本的中心节点 (`CentralControllerNode`, `CentralControllerSSVEPNode`, `CentralControllerSSVEPNode2`, `CentralControllerSSVEPNode3`, `CentralControllerSSVEPNode4`, `CentralControllerSSVEPTrainNode`)，表明该系统经历了多轮迭代，支持不同复杂度或类型的 SSVEP/P300 实验范式（如在线解码、离线训练等）。主线是`CentralControllerSSVEPNodeX.py`
 - **decode**:通过发布话题 `/image_seg`（注意 ROS/OpenCV 的二维图像坐标系原点在左上角、Y 轴向下，而 Unity 原点在左下角、Y 轴向上，需要在发布前做垂直翻转），发布 6 张实际显示的图片。当 6 张图片接收完成后，Unity 类似`SSVEP_Stimulus2.cs`的脚本设置`isBatchCompleted = true`。
-接着 ROS 发布命令 `cmd=decode_prepare` 到 `/image_seg`，Unity 接收后准备显示界面。随后 ROS 发布 `cmd=decode_stim` 到 `/image_seg`，Unity 检查 `isBatchCompleted == true` 后开始 SSVEP 闪烁，同时通过 UDP 发送 t`rial_started={trial_id}` 到 ROS 端口 10000 确认 trial 开始。
-在 `CentralControllerSSVEPNode4.py` 中，decode 模式还会复用 pretrain 的 EEG 采集链路：进入 `decode_stimulating` 时 ROS 通过 UDP 向 Windows COM 转发器发送 `trigger 1`，停止刺激时发送 `trigger 2`。Windows 侧 Neuracle TCP 转发流中的 trigger 通道用于闭合当前 decode epoch，最终除了图片槽位映射关系（mapping CSV）和 trial 元数据（trials CSV）外，还会额外保存 decode EEG 的 trial CSV、metadata CSV 和 `ssvep4_decode_dataset_*.npy`。
+接着 ROS 通过独立控制话题 `/ssvep_decode_cmd` 发布命令 `cmd=prepare`，Unity 接收后准备显示界面。随后 ROS 再通过 `/ssvep_decode_cmd` 发布 `cmd=stim`，Unity 检查 `isBatchCompleted == true` 后开始 SSVEP 闪烁，同时通过 UDP 发送 `trial_started={trial_id}` 到 ROS 端口 10000 确认 trial 开始。
+在 `CentralControllerSSVEPNode4.py` / `SSVEP_Communication_Node.py` 这类 decode 控制节点中，decode 模式会复用 pretrain 的 EEG 采集链路：进入 `decode_stimulating` 时 ROS 通过 UDP 向 Windows COM 转发器发送 `trigger 1`，停止刺激时发送 `trigger 2`，并通过 `/ssvep_decode_cmd` 发送 `cmd=stop`。Unity 侧此时停止闪烁，但保留当前 6 张图片继续显示，直到下一批图片覆盖；`cmd=done` 也沿用这一“停闪保留画面”的语义。Windows 侧 Neuracle TCP 转发流中的 trigger 通道用于闭合当前 decode epoch，最终除了图片槽位映射关系（mapping CSV）和 trial 元数据（trials CSV）外，还会额外保存 decode EEG 的 trial CSV、metadata CSV 和 `ssvep4_decode_dataset_*.npy`。
 - **pretrain**:Pretrain 模式用于采集 SSVEP 训练数据。首先根据 `num_targets`（目标数量，默认 8）和 `pretrain_repetitions_per_target`（每个目标重复次数，默认 3）生成试次计划并打乱顺序。
 每个 `trial` 开始时，ROS 通过话题 `/ssvep_train_cmd` 发布命令 `cmd=cue`，Unity 接收后显示提示界面（高亮当前目标，告诉受试者注视哪个位置），持续 `pretrain_cue_duration_s` 秒（默认 2.0s）。
 随后 ROS 发布 `cmd=stim` 到 `/ssvep_train_cmd`，Unity 类似`SSVEP_Stimulus2.cs`的脚本开始 SSVEP 闪烁刺激。同时 ROS 通过 UDP 发送 `trigger 1` 到 `192.168.56.3:8888`（Windows COM 转发器），用于 EEG 打标标记刺激开始。Unity 通过 UDP 发送 `trial_start={trial_id};target={target_id}` 到 ROS 端口 `10001` 确认。刺激持续 `pretrain_stim_duration_s` 秒（默认 1.5s）。
@@ -60,6 +60,10 @@
 ### 2.4 跨平台通信 (Inter-Process Communication)
 系统采用了**混合通信模型**以平衡复杂数据传输与低延迟控制需求：
 - **ROS2 Topics**: 用于传输结构化、体积较大或非时间关键的数据（如脑电信号流、图像分割数据 `/image_seg`）。Unity 端通过 `ROS-TCP-Endpoint` 接入 ROS2 网络。
+- **Decode 控制分离**: 当前主链路中，decode 图片数据与 decode 控制命令已拆分为两个 ROS topic：
+  - `/image_seg`：只承载 6 张 decode 图片
+  - `/ssvep_decode_cmd`：只承载 `prepare/stim/stop/done`
+- **Decode stop/done 语义**: `stop` 与 `done` 不再清空 decode 图片，也不立即隐藏 `stimulusPanel`；它们只负责停止闪烁，当前图片保持显示，直到下一轮图片覆盖。
 - **UDP 通信**: 针对具有极高时间敏感性的同步信号（Triggers）和控制指令，系统额外使用了 UDP 协议（常用端口如 9999, 10000, 12001），绕过 ROS2 的中间件开销，确保脑电打标(Marking)与视觉刺激的精确对齐（详见 `history_sender.py` 及 C# 侧的 `HistoryManager.cs`）。
 - **EEG TCP + Trigger 内嵌通道**: 当前 SSVEP 主线节点 (`Node3` pretrain, `Node4` decode/pretrain) 直接连接 Windows `8712` EEG TCP 服务，并以每采样点帧的最后一个 float32 作为 trigger 通道，从而按 `trigger=1 -> trigger=2` 精确切 epoch。Windows 端发送格式为 `Ch1(4B) -> Ch2(4B) -> ... -> ChN(4B) -> Trigger(4B) -> Next Ch1...`。
 - **待测试和合并的脚本**:`history_sender_node` 是一个用于向 Unity 发送历史图片队列的辅助节点，主要用于在 Unity 界面上显示已选择/已操作的图片历史记录，并支持通过命令删除历史记录中的图片。

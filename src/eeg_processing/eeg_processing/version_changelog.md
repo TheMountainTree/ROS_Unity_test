@@ -76,6 +76,7 @@
 
 - **24 图 / 4 组批次发布**：`reasoner_publish_test.py` 从 `~/Pictures/截图` 中按自然排序取前 24 张图片，切成 4 组，每组 6 张。
 - **显式握手**：通信节点先发 `cmd=ssvep_ready`，reasoner 回 `cmd=reasoner_ready` 后才进入正常流程，解决两个节点启动顺序敏感的问题。
+- **Decode 控制话题拆分**：主链路中的 decode 控制命令已从 `/image_seg` 拆分到独立话题 `/ssvep_decode_cmd`，与 pretrain 控制话题 `/ssvep_train_cmd` 分离。
 - **参数注入式选择**：通过 `mock_selected_index` 模拟 EEG 已给出的用户选择结果。
 - **history 交互**：
   - `0/1/2/4/5/6`：把对应槽位图片写入 `/history_image`
@@ -86,6 +87,7 @@
 
 - **history 缩略图尺寸修复**：reasoner 模式初版直接把 `640x480` 的主显示图发给 `/history_image`，导致 `HistoryManager.cs` 所在 ScrollView 布局被撑开。现已在 ROS 端统一缩放为 `100x100`，与原 `history_sender.py` 协议保持一致。
 - **槽位索引映射修复**：reasoner 模式初版仍然沿用 decode 里的随机 `shuffle`，导致 `mock_selected_index=0` 不一定对应屏幕 0 号槽位显示的那张图。现已在 reasoner 模式中关闭 shuffle，固定屏幕槽位与输入组顺序的一一对应关系。
+- **Decode stop/done 语义修复**：Unity 侧 decode 命令初版虽然已迁移到 `/ssvep_decode_cmd`，但 `stop/done` 仍沿用旧收尾逻辑，会隐藏 `stimulusPanel` 并清空当前纹理。现已改为仅停止闪烁、保留当前图片，直到下一批图片覆盖。
 
 ### 当前槽位定义
 

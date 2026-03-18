@@ -39,7 +39,8 @@
    - **SSVEP**: 提供基于 eTRCA (Ensemble Task-Related Component Analysis) 算法的核心流水线 (`ssvep_pipeline.py`)，并包含 FBCCA 作为零需训练比对基准。
    - **P300**: 包含基于 EOG 回归伪迹去除机制的离线处理与在线缓冲流提取系统 (`p300_processing_test_online.py`)。
 4. **跨平台通信模型 (IPC)**:
-   - **ROS2 Topics**: 用于传输常规控制指令及较大数据体（如通过 `/image_seg` 发送给 Unity 的结构化图像组）。依赖官方包 `ROS-TCP-Endpoint`。
+- **ROS2 Topics**: 用于传输常规控制指令及较大数据体（如通过 `/image_seg` 发送给 Unity 的结构化图像组）。依赖官方包 `ROS-TCP-Endpoint`。
+- **SSVEP decode 双话题模型**: 当前主链路中，decode 图片走 `/image_seg`，decode 控制命令单独走 `/ssvep_decode_cmd`，与 pretrain 控制话题 `/ssvep_train_cmd` 分离。
    - **UDP Socket**: 为确保脑电打标与视觉刺激极高的时间对齐要求，Trigger 与精准 Timing 确认使用旁路 UDP 协议。
 5. **Reasoner 分组交互测试 (Reasoner Decode Loop)**:
    - 新增 `publisher_test/reasoner_publish_test.py`，可从 `~/Pictures/截图` 中按自然排序取前 24 张图片，切成 4 组，每组 6 张。
@@ -91,7 +92,8 @@ ros2 run publisher_test reasoner_publish_test
 ros2 run eeg_processing ssvep_communication_node --ros-args \
   -p reasoner_mode_enabled:=true \
   -p reasoner_input_topic:=/reasoner/images \
-  -p reasoner_output_topic:=/reasoner/feedback
+  -p reasoner_output_topic:=/reasoner/feedback \
+  -p decode_command_topic:=/ssvep_decode_cmd
 ```
 
 ### 3. 测试与工具工具
@@ -114,6 +116,11 @@ ros2 run eeg_processing history_sender_node
 - 握手协议：
   - communication -> reasoner: `cmd=ssvep_ready`
   - reasoner -> communication: `cmd=reasoner_ready`
+- decode 控制话题：
+  - 图片：`/image_seg`
+  - 命令：`/ssvep_decode_cmd`
+  - 命令集合：`prepare / stim / stop / done`
+  - `stop / done` 语义：停止闪烁，但保留当前 6 张图片显示，直到下一批图片覆盖
 - 选择参数：
   - `mock_selected_index=0/1/2/4/5/6`：将当前屏幕对应槽位图片推入 history，并请求下一组
   - `mock_selected_index=3`：把所有 history 图片回传给 reasoner，当前 6 张保持不变
@@ -148,6 +155,7 @@ ROS_Unity_test/
 4. **统一通信配置区**: `Node4` 将 decode / pretrain 共用的通信参数统一整理为共享配置区，复用 Unity UDP 回执、Windows trigger 转发、Windows EEG TCP 链路。
 5. **验证工具补全**: 除 `validate_ssvep3_npy.py` 外，新增 `validate_ssvep4_npy.py`，用于绘制 decode 阶段的 EEG epoch 图（默认单 epoch）。
 6. **Reasoner 闭环测试**: 新增 24 图/4 组 reasoner 测试模式，支持握手、history 回传、撤销回退，以及 history 缩略图固定尺寸（默认 `100x100`）。
+7. **Decode 控制拆分与停闪保留画面**: 当前主链路把 decode 控制命令拆到 `/ssvep_decode_cmd`，并将 `stop/done` 改为“停止闪烁但保留当前图片，直到下一批覆盖”。
 
 ## Node4 通信配置速览
 `CentralControllerSSVEPNode4.py` 当前将以下链路作为统一共享通信配置：

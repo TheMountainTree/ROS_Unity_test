@@ -32,6 +32,7 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
     // Inspector：ROS 话题
     // --------------------------
     public string decodeImageTopic = "/image_seg";
+    public string decodeCommandTopic = "/ssvep_decode_cmd";
     public string trainCommandTopic = "/ssvep_train_cmd";
     public bool useReliableQos = true;
     public bool useManualRefreshRate = true;
@@ -62,12 +63,16 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
     private UdpClient udpSender;
     private ROS2Node node;
     private ISubscription<RosImage> decodeSubscription;
+    private ISubscription<RosImage> decodeCommandSubscription;
     private ISubscription<RosImage> trainSubscription;
 
     // 解码数据流队列
     private readonly Queue<byte[]> pendingImageData = new Queue<byte[]>();
     private readonly Queue<(int width, int height)> pendingImageSizes = new Queue<(int, int)>();
     private readonly Queue<string> pendingImageFrameIds = new Queue<string>();
+
+    // 解码控制命令队列
+    private readonly Queue<string> pendingDecodeCmdFrameIds = new Queue<string>();
 
     // 训练命令队列
     private readonly Queue<string> pendingTrainCmdFrameIds = new Queue<string>();
@@ -182,25 +187,19 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
         );
 
         decodeSubscription = node.CreateSubscription<RosImage>(decodeImageTopic, OnDecodeImageReceived, qos);
+        decodeCommandSubscription = node.CreateSubscription<RosImage>(decodeCommandTopic, OnDecodeCommandReceived, qos);
         trainSubscription = node.CreateSubscription<RosImage>(trainCommandTopic, OnTrainCommandReceived, qos);
 
-        Debug.Log($"Subscribed decode topic={decodeImageTopic}, train topic={trainCommandTopic}");
+        Debug.Log(
+            $"Subscribed decode image topic={decodeImageTopic}, " +
+            $"decode command topic={decodeCommandTopic}, train topic={trainCommandTopic}"
+        );
     }
 
     // 解码回调：处理解码采集模式下的图像批次。
     void OnDecodeImageReceived(RosImage msg)
     {
         string frameId = msg.Header != null ? msg.Header.Frame_id : "";
-
-        // 如果该消息是命令帧，则放入训练命令解析队列。
-        if (!string.IsNullOrEmpty(frameId) && frameId.ToLowerInvariant().Contains("cmd="))
-        {
-            lock (queueLock)
-            {
-                pendingTrainCmdFrameIds.Enqueue(frameId);
-            }
-            return;
-        }
 
         if (msg.Encoding != "bgr8")
         {
@@ -214,6 +213,19 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
             pendingImageData.Enqueue(dataCopy);
             pendingImageSizes.Enqueue(((int)msg.Width, (int)msg.Height));
             pendingImageFrameIds.Enqueue(frameId);
+        }
+    }
+
+    void OnDecodeCommandReceived(RosImage msg)
+    {
+        string frameId = msg.Header != null ? msg.Header.Frame_id : "";
+        if (string.IsNullOrWhiteSpace(frameId))
+        {
+            return;
+        }
+        lock (queueLock)
+        {
+            pendingDecodeCmdFrameIds.Enqueue(frameId);
         }
     }
 
@@ -235,10 +247,16 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
     {
         lock (queueLock)
         {
+            while (pendingDecodeCmdFrameIds.Count > 0)
+            {
+                string frameId = pendingDecodeCmdFrameIds.Dequeue();
+                HandleDecodeCommand(frameId);
+            }
+
             while (pendingTrainCmdFrameIds.Count > 0)
             {
                 string frameId = pendingTrainCmdFrameIds.Dequeue();
-                HandleTrainLikeCommand(frameId);
+                HandleTrainCommand(frameId);
             }
 
             while (pendingImageData.Count > 0)
@@ -257,19 +275,8 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
     void HandleDecodeImagePacket(byte[] data, int width, int height, string frameId)
     {
         int trialId, imgIdx, targetId;
-        string cmd;
-        if (!TryParseDecodeFrameMeta(frameId, out trialId, out imgIdx, out targetId, out cmd))
+        if (!TryParseDecodeFrameMeta(frameId, out trialId, out imgIdx, out targetId))
         {
-            return;
-        }
-
-        if (cmd == "stop")
-        {
-            if (currentTrialId > 0 && trialId == currentTrialId)
-            {
-                StopCurrentStimulationVisuals(sendDecodeEndTrigger: true);
-                ResetDecodeBatchState(clearQueues: false);
-            }
             return;
         }
 
@@ -283,7 +290,7 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
         {
             if (trialId > currentTrialId)
             {
-                StopCurrentStimulationVisuals(sendDecodeEndTrigger: true);
+                StopDecodeStimulationKeepVisuals(sendDecodeEndTrigger: true);
                 ResetDecodeBatchState(clearQueues: false);
                 currentTrialId = trialId;
                 currentTargetId = targetId;
@@ -379,16 +386,16 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
     }
 
     // --------------------------------------
-    // 训练类命令处理
+    // 解码/训练命令处理
     // --------------------------------------
-    void HandleTrainLikeCommand(string frameId)
+    void HandleDecodeCommand(string frameId)
     {
-        if (!TryParseTrainCommand(frameId, out string cmd, out int trialId, out int targetId))
+        if (!TryParseCommand(frameId, out string cmd, out int trialId, out int targetId))
         {
             return;
         }
 
-        if (cmd == "decode_prepare")
+        if (cmd == "prepare")
         {
             if (trialId > 0) currentTrialId = trialId;
             if (targetId > 0) currentTargetId = targetId;
@@ -396,7 +403,7 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
             return;
         }
 
-        if (cmd == "decode_stim")
+        if (cmd == "stim")
         {
             if (trialId > 0) currentTrialId = trialId;
             if (targetId > 0) currentTargetId = targetId;
@@ -407,10 +414,23 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
             return;
         }
 
-        if (cmd == "decode_stop")
+        if (cmd == "stop")
         {
-            StopCurrentStimulationVisuals(sendDecodeEndTrigger: true);
-            ResetDecodeBatchState(clearQueues: false);
+            StopDecodeStimulationKeepVisuals(sendDecodeEndTrigger: true);
+            return;
+        }
+
+        if (cmd == "done")
+        {
+            StopDecodeStimulationKeepVisuals(sendDecodeEndTrigger: false);
+            return;
+        }
+    }
+
+    void HandleTrainCommand(string frameId)
+    {
+        if (!TryParseCommand(frameId, out string cmd, out int trialId, out int targetId))
+        {
             return;
         }
 
@@ -524,6 +544,21 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
         visualMode = VisualMode.None;
     }
 
+    void StopDecodeStimulationKeepVisuals(bool sendDecodeEndTrigger)
+    {
+        StopAllCoroutines();
+        SetAllFramesAlpha(0f);
+        if (stimulusPanel != null) stimulusPanel.SetActive(true);
+
+        if (sendDecodeEndTrigger && visualMode == VisualMode.Decode && decodeStimStarted && currentTargetId > 0)
+        {
+            SendDecodeMarker(200 + Mathf.Max(1, currentTargetId));
+        }
+
+        decodeStimStarted = false;
+        visualMode = VisualMode.Decode;
+    }
+
     void ResetDecodeBatchState(bool clearQueues)
     {
         if (clearQueues)
@@ -545,12 +580,11 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
         currentTargetId = -1;
     }
 
-    bool TryParseDecodeFrameMeta(string frameId, out int trialId, out int imgIdx, out int targetId, out string cmd)
+    bool TryParseDecodeFrameMeta(string frameId, out int trialId, out int imgIdx, out int targetId)
     {
         trialId = -1;
         imgIdx = -1;
         targetId = -1;
-        cmd = "";
         if (string.IsNullOrEmpty(frameId)) return false;
 
         string[] parts = frameId.Split(';');
@@ -565,14 +599,12 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
             else if (key == "img") int.TryParse(val, out imgIdx);
             else if (key == "target") int.TryParse(val, out targetId);
             else if (key == "image_id") int.TryParse(val, out targetId);
-            else if (key == "cmd") cmd = val.ToLowerInvariant();
         }
 
-        if (cmd == "stop") return trialId > 0;
         return trialId > 0 && imgIdx > 0 && targetId > 0;
     }
 
-    bool TryParseTrainCommand(string frameId, out string cmd, out int trialId, out int targetId)
+    bool TryParseCommand(string frameId, out string cmd, out int trialId, out int targetId)
     {
         cmd = "";
         trialId = -1;
@@ -717,6 +749,7 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
         if (redImageTexture != null) Destroy(redImageTexture);
         if (whiteImageTexture != null) Destroy(whiteImageTexture);
         decodeSubscription?.Dispose();
+        decodeCommandSubscription?.Dispose();
         trainSubscription?.Dispose();
         (node as IDisposable)?.Dispose();
         udpSender?.Close();

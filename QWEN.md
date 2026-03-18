@@ -11,6 +11,12 @@ This is a **ROS2 (Robot Operating System 2) workspace** for a **Brain-Computer I
 - **NumPy/SciPy**: Signal processing and machine learning
 - **TCP/UDP**: Hybrid communication for data streaming and time-critical triggers
 
+### Current Mainline
+**`SSVEP_Communication_Node.py`** 是当前核心主线节点，基于 `CentralControllerSSVEPNode4` 演进而来，统一支持：
+- **decode 模式**：标准解码采集 + Reasoner 外部图片分组模式
+- **pretrain 模式**：预训练数据采集
+- **Reasoner 交互模式**：24图分组测试、双节点握手、history 回传/撤销
+
 ### Architecture Summary
 ```
 ┌─────────────────┐     TCP      ┌──────────────────┐
@@ -30,7 +36,7 @@ This is a **ROS2 (Robot Operating System 2) workspace** for a **Brain-Computer I
              ▼
 ┌─────────────────────┐     UDP (Triggers)
 │   Unity Frontend    │ ◀────────────────▶ ROS Nodes
-│  (Visual Stimulus)  │    Port 9999/10000/10001
+│  (Visual Stimulus)  │    Port 9999/10000/10001/12001
 └─────────────────────┘
 ```
 
@@ -54,6 +60,7 @@ ROS_Unity_test/
 │   │   ├── publisher_test/
 │   │   │   ├── eeg_tcp_listener_node.py  # TCP client for EEG amplifier
 │   │   │   ├── image_publisher.py        # Test image publisher
+│   │   │   ├── reasoner_publish_test.py  # Reasoner group test node
 │   │   │   └── udp_sender_node.py        # Test UDP trigger sender
 │   │   └── setup.py
 │   └── ROS-TCP-Endpoint/         # Unity-ROS bridge (external package)
@@ -61,7 +68,8 @@ ROS_Unity_test/
 │   ├── central_controller/
 │   ├── central_controller_ssvep2/
 │   ├── central_controller_ssvep3/
-│   └── central_controller_ssvep_train/
+│   ├── central_controller_ssvep_train/
+│   └── analysis/
 ├── dev_logs/                     # Development notes (Chinese)
 ├── build/                        # Colcon build artifacts
 ├── install/                      # Installed packages
@@ -83,19 +91,28 @@ source install/setup.bash                   # Load into environment
 ### Running Nodes
 ```bash
 # Start Unity TCP endpoint
-ros2 launch ros_tcp_endpoint endpoint.py
+ros2 run ros_tcp_endpoint default_server_endpoint --ros-args -p ROS_IP:=0.0.0.0
 
-# SSVEP decode mode
-ros2 run eeg_processing central_controller_ssvep_node2 --ros-args -p run_mode:=decode
+# SSVEP decode mode (Node4 - latest)
+ros2 run eeg_processing central_controller_ssvep_node4 --ros-args -p run_mode:=decode
 
 # SSVEP pretrain mode
-ros2 run eeg_processing central_controller_ssvep_node2 --ros-args -p run_mode:=pretrain
+ros2 run eeg_processing central_controller_ssvep_node4 --ros-args -p run_mode:=pretrain
 
 # EEG TCP listener (connects to amplifier)
 ros2 run publisher_test eeg_tcp_listener_node
 
 # History sender (UDP sync to Unity)
 ros2 run eeg_processing history_sender_node
+
+# Reasoner group test (24 images / 4 groups)
+ros2 run publisher_test reasoner_publish_test
+
+# SSVEP Communication Node (reasoner mode)
+ros2 run eeg_processing ssvep_communication_node --ros-args \
+  -p reasoner_mode_enabled:=true \
+  -p reasoner_input_topic:=/reasoner/images \
+  -p reasoner_output_topic:=/reasoner/feedback
 ```
 
 ### Testing
@@ -110,6 +127,15 @@ ament_flake8 src/eeg_processing/eeg_processing/
 ament_pep257 src/eeg_processing/eeg_processing/
 ```
 
+### Data Validation
+```bash
+# Validate pretrain dataset
+python3 src/eeg_processing/eeg_processing/validate_ssvep3_npy.py
+
+# Validate decode dataset
+python3 src/eeg_processing/eeg_processing/validate_ssvep4_npy.py
+```
+
 ---
 
 ## Key ROS2 Nodes and Entry Points
@@ -121,8 +147,10 @@ ament_pep257 src/eeg_processing/eeg_processing/
 | `central_controller_ssvep_node` | CentralControllerSSVEPNode.py | SSVEP controller (v1) |
 | `central_controller_ssvep_node2` | CentralControllerSSVEPNode2.py | SSVEP controller (v2, dual-mode) |
 | `central_controller_ssvep_node3` | CentralControllerSSVEPNode3.py | SSVEP controller (v3, online fusion) |
+| `central_controller_ssvep_node4` | CentralControllerSSVEPNode4.py | SSVEP controller (v4, unified config) |
 | `central_controller_ssvep_train_node` | CentralControllerSSVEPTrainNode.py | SSVEP training data collector |
 | `history_sender_node` | history_sender.py | UDP state synchronization |
+| `ssvep_communication_node` | SSVEP_Communication_Node.py | Reasoner mode communication |
 
 ### publisher_test Package
 | Entry Point | Module | Description |
@@ -131,6 +159,7 @@ ament_pep257 src/eeg_processing/eeg_processing/
 | `image_publisher` | image_publisher.py | Test image publisher |
 | `seg_image_publisher` | seg_image_publisher.py | Segmentation image publisher |
 | `udp_sender_node` | udp_sender_node.py | Test UDP trigger sender |
+| `reasoner_publish_test` | reasoner_publish_test.py | Reasoner group test (24 images) |
 
 ---
 
@@ -157,20 +186,29 @@ ament_pep257 src/eeg_processing/eeg_processing/
 | Topic | Message Type | Purpose |
 |-------|--------------|---------|
 | `/eeg_data` | `Float32MultiArray` | Raw EEG samples from amplifier |
-| `/image_seg` | Custom | Image segmentation data for Unity |
-| `/ssvep_train_cmd` | Custom | Training commands to Unity |
+| `/image_seg` | `sensor_msgs/Image` | Image segmentation data for Unity |
+| `/ssvep_train_cmd` | `std_msgs/String` | Training commands to Unity |
+| `/history_image` | `sensor_msgs/Image` | History images for Unity display |
+| `/history_control` | `std_msgs/String` | History control commands |
+| `/reasoner/images` | Custom | Reasoner image batches |
+| `/reasoner/feedback` | Custom | Reasoner feedback commands |
 
 ### UDP Ports (Time-Critical Triggers)
 | Port | Direction | Purpose |
 |------|-----------|---------|
 | 9999 | Unity → ROS | Decode markers |
-| 10000 | ROS → Unity | Decode ACK |
-| 10001 | Unity → ROS | Training markers |
+| 10000 | ROS ← Unity | Decode ACK / trial started |
+| 10001 | ROS ← Unity | Training markers |
+| 12001 | ROS → Unity | History control (delete_last, etc.) |
+| 5006 | ROS → Windows | Trigger forwarding |
+| 8888 | Windows ← ROS | Windows COM trigger receiver |
 
 ### TCP Configuration
 - EEG amplifier connects to TCP listener (configurable host/port)
+- Default: `192.168.56.3:8712` (Windows Neuracle TCP forward)
 - `TCP_NODELAY` enabled for low-latency streaming
 - Buffer handling for TCP packet fragmentation
+- Data format: `Ch1(4B) → Ch2(4B) → ... → ChN(4B) → Trigger(4B) → Next Ch1...`
 
 ---
 
@@ -180,7 +218,7 @@ ament_pep257 src/eeg_processing/eeg_processing/
 - **Style**: PEP 8 with 4-space indentation
 - **Docstrings**: PEP 257 format
 - **Naming**: `snake_case` for files/modules, `CamelCase` for classes
-- **Node naming**: Descriptive names like `CentralControllerSSVEPNode2`
+- **Node naming**: Descriptive names like `CentralControllerSSVEPNode4`
 
 ### C# (Unity Scripts)
 - Located in `eeg_processing/eeg_processing/` as reference copies
@@ -200,6 +238,8 @@ ament_pep257 src/eeg_processing/eeg_processing/
 - `brainda` - BCI algorithms (optional, lazy-imported)
 - `rclpy` - ROS2 Python client
 - `std_msgs`, `sensor_msgs`, `cv_bridge` - ROS2 messages
+- `PIL` (Pillow) - Image processing
+- `opencv-python` - Computer vision
 
 ### System
 - ROS2 Humble or later
@@ -226,13 +266,19 @@ data/
 
 ### Version Evolution
 - **SSVEP Stimulus**: `SSVEP_Stimulus.cs` → `SSVEP_Stimulus2.cs` (unified decode/train modes)
-- **Central Controller**: v1 → v2 (dual-mode) → v3 (online fusion with `CircularEEGBuffer`)
+- **Central Controller**: v1 → v2 (dual-mode) → v3 (online fusion with `CircularEEGBuffer`) → v4 (unified config)
 - **Communication**: UDP → TCP for EEG data (reliability improvement)
 
 ### Key Design Principles
 1. **Separation of Concerns**: Controllers handle state machines and timing; separate nodes handle data acquisition
 2. **Hybrid Communication**: ROS2 for structured data, UDP for time-critical triggers
 3. **Modular Pipelines**: Signal processing algorithms encapsulated in reusable classes
+
+### Recent Features (Node4 & Reasoner Mode)
+- **Unified Communication Config**: Shared network parameters for decode/pretrain modes
+- **EEG TCP + Trigger Integration**: Decode mode now captures EEG data with trigger markers
+- **Reasoner Test Mode**: 24-image/4-group testing with handshake protocol
+- **History Management**: Fixed-size thumbnails (100x100) with add/delete/clear operations
 
 ---
 
