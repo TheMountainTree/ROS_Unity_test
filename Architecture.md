@@ -13,34 +13,34 @@
 - **演进**: 系统中存在多个版本的中心节点 (`CentralControllerNode`, `CentralControllerSSVEPNode`, `CentralControllerSSVEPNode2`, `CentralControllerSSVEPNode3`, `CentralControllerSSVEPNode4`, `CentralControllerSSVEPTrainNode`)，表明该系统经历了多轮迭代，支持不同复杂度或类型的 SSVEP/P300 实验范式（如在线解码、离线训练等）。主线是`CentralControllerSSVEPNodeX.py`
 - **decode**:通过发布话题 `/image_seg`（注意 ROS/OpenCV 的二维图像坐标系原点在左上角、Y 轴向下，而 Unity 原点在左下角、Y 轴向上，需要在发布前做垂直翻转），发布 6 张实际显示的图片。当 6 张图片接收完成后，Unity 类似`SSVEP_Stimulus2.cs`的脚本设置`isBatchCompleted = true`。
 接着 ROS 通过独立控制话题 `/ssvep_decode_cmd` 发布命令 `cmd=prepare`，Unity 接收后准备显示界面。随后 ROS 再通过 `/ssvep_decode_cmd` 发布 `cmd=stim`，Unity 检查 `isBatchCompleted == true` 后开始 SSVEP 闪烁，同时通过 UDP 发送 `trial_started={trial_id}` 到 ROS 端口 10000 确认 trial 开始。
-在 `CentralControllerSSVEPNode4.py` / `SSVEP_Communication_Node.py` 这类 decode 控制节点中，decode 模式会复用 pretrain 的 EEG 采集链路：进入 `decode_stimulating` 时 ROS 通过 UDP 向 Windows COM 转发器发送 `trigger 1`，停止刺激时发送 `trigger 2`，并通过 `/ssvep_decode_cmd` 发送 `cmd=stop`。Unity 侧此时停止闪烁，但保留当前 6 张图片继续显示，直到下一批图片覆盖；`cmd=done` 也沿用这一“停闪保留画面”的语义。Windows 侧 Neuracle TCP 转发流中的 trigger 通道用于闭合当前 decode epoch，最终除了图片槽位映射关系（mapping CSV）和 trial 元数据（trials CSV）外，还会额外保存 decode EEG 的 trial CSV、metadata CSV 和 `ssvep4_decode_dataset_*.npy`。
+在 `CentralControllerSSVEPNode4.py` / `SSVEP_Communication_Node2.py` 这类 decode 控制节点中，decode 模式会复用 pretrain 的 EEG 采集链路：进入 `decode_stimulating` 时 ROS 通过 UDP 向 Windows COM 转发器发送 `trigger 1`，停止刺激时发送 `trigger 2`，并通过 `/ssvep_decode_cmd` 发送 `cmd=stop`。Unity 侧此时停止闪烁，但保留当前 6 张图片继续显示，直到下一批图片覆盖；`cmd=done` 也沿用这一“停闪保留画面”的语义。Windows 侧 Neuracle TCP 转发流中的 trigger 通道用于闭合当前 decode epoch，最终除了图片槽位映射关系（mapping CSV）和 trial 元数据（trials CSV）外，还会额外保存 decode EEG 的 trial CSV、metadata CSV 和 `ssvep4_decode_dataset_*.npy`。
 - **pretrain**:Pretrain 模式用于采集 SSVEP 训练数据。首先根据 `num_targets`（目标数量，默认 8）和 `pretrain_repetitions_per_target`（每个目标重复次数，默认 3）生成试次计划并打乱顺序。
 每个 `trial` 开始时，ROS 通过话题 `/ssvep_train_cmd` 发布命令 `cmd=cue`，Unity 接收后显示提示界面（高亮当前目标，告诉受试者注视哪个位置），持续 `pretrain_cue_duration_s` 秒（默认 2.0s）。
 随后 ROS 发布 `cmd=stim` 到 `/ssvep_train_cmd`，Unity 类似`SSVEP_Stimulus2.cs`的脚本开始 SSVEP 闪烁刺激。同时 ROS 通过 UDP 发送 `trigger 1` 到 `192.168.56.3:8888`（Windows COM 转发器），用于 EEG 打标标记刺激开始。Unity 通过 UDP 发送 `trial_start={trial_id};target={target_id}` 到 ROS 端口 `10001` 确认。刺激持续 `pretrain_stim_duration_s` 秒（默认 1.5s）。
 刺激结束后，ROS 发布 `cmd=rest` 到 `/ssvep_train_cmd`，Unity 显示休息界面。同时 ROS 通过 UDP 发送 `trigger 2` 到 `192.168.56.3:8888`，标记刺激结束。ROS 从 EEG 环形缓冲区（CircularEEGBuffer）提取 `trigger=1` 到 `trigger=2` 之间的 EEG 数据作为 epoch，保存到 `dataset_x`，标签保存到 `dataset_y`。休息持续 `pretrain_rest_duration_s` 秒（默认 1.0s）。
 所有 trial 结束后，ROS 将 EEG 数据集保存为 `.npy` 文件（包含 x 和 y 数组），并发布 `cmd=done` 到 `/ssvep_train_cmd` 通知 Unity 实验结束。
 
-### 2.1.1 Node4 统一通信配置区
-`CentralControllerSSVEPNode4.py` 在参数层面把网络链路统一整理为一组共享配置，decode 与 pretrain 共用：
-- Unity decode 回执 UDP：`decode_start_bind_ip` / `decode_start_port`
-- Unity pretrain 回执 UDP：`train_trigger_bind_ip` / `train_trigger_bind_port`
-- Windows trigger 转发：`trigger_local_ip` / `trigger_local_port` -> `trigger_remote_ip` / `trigger_remote_port`
-- Windows EEG TCP：`eeg_server_ip` / `eeg_server_port`
-- EEG 数据帧：`eeg_recv_buffer_size` / `eeg_n_channels` / `eeg_frame_floats` / `eeg_fs`
+### 2.1.1 Node2 静态通信配置区
+`SSVEP_Communication_Node2.py` 当前把网络链路按设备整理为静态配置，decode 与 pretrain 共用：
+- Unity 通信：`host_ip` + `decode_start_port` / `pretrain_start_port`
+- Windows trigger 转发：`local_ip` / `local_port` -> `remote_ip` / `remote_port`
+- Windows EEG TCP：`server_ip` / `server_port`
+- EEG 数据帧：`recv_buffer_size` / `n_channels` / `frame_floats` / `fs`
 
-在代码内部，这些配置由统一加载函数管理，decode / pretrain 只读取各自的时序参数，不再重复解析同一套 IP 和端口。
+这些默认值统一定义在 `ssvep_communication_node2_config.py` 中，节点运行时只保留少量联调参数继续通过 ROS 覆盖。
 
-### 2.1.2 Reasoner 分组测试模式 (`SSVEP_Communication_Node.py`)
-除 `CentralControllerSSVEPNode4.py` 主线外，仓库中还维护了一个面向 Unity 交互测试的 `SSVEP_Communication_Node.py` 变体。2026-03-18 的版本新增了一套外部图片组驱动的 decode 模式，用于验证“用户逐轮选图 + history 回传/撤销”的上层交互逻辑，而不是传统随机 decode 图像映射。
+### 2.1.2 Reasoner 分组测试模式 (`SSVEP_Communication_Node2.py`)
+除 `CentralControllerSSVEPNode4.py` 主线外，仓库中当前还维护了一个面向 Unity 交互测试的 `SSVEP_Communication_Node2.py` 变体。该节点把静态配置抽离到 `ssvep_communication_node2_config.py`，只保留少量运行时参数（如 `run_mode`、`reasoner_mode_enabled`、`mock_selected_index`、`save_dir`、`image_dir`、`decode_max_trials`）。
 
 该模式通过参数 `reasoner_mode_enabled=true` 打开，核心特性如下：
-- **外部图片批次输入**：不再从 `image_dir` 自行取图，而是订阅 `reasoner_input_topic`（默认 `/reasoner/images`）接收外部 6 图批次。
-- **双节点握手**：节点启动后周期向 `reasoner_output_topic`（默认 `/reasoner/feedback`）发送 `cmd=ssvep_ready`，等待 reasoner 节点回 `cmd=reasoner_ready` 后才进入正常批次流程，避免依赖严格启动时序。
+- **外部图片批次输入**：不再从 `image_dir` 自行取图，而是订阅 `reasoner_input_topic`（默认 `/reasoner/images`，在静态配置中定义）接收外部 6 图批次。
+- **双节点握手**：节点启动后周期向 `reasoner_output_topic`（默认 `/reasoner/feedback`，在静态配置中定义）发送 `cmd=ssvep_ready`，等待 reasoner 节点回 `cmd=reasoner_ready` 后才进入正常批次流程，避免依赖严格启动时序。
 - **固定槽位映射**：在 reasoner 模式下禁用 decode 的随机 `shuffle`，屏幕 2x4 布局固定为：
   - 第一行：`0 1 2 3`
   - 第二行：`4 5 6 7`
   - 其中 `3` 为勾、`7` 为叉，动态图固定落在 `0/1/2/4/5/6`
 - **参数模拟选择**：通过 `mock_selected_index` 注入“已完成 EEG 解码后的用户选择结果”。节点会先缓存参数，再在可处理状态消费，避免 `ros2 param set` 早于 trial 完成时丢失。
+- **静态配置抽离**：topic、端口、时序、图片目录等默认值统一放在 `ssvep_communication_node2_config.py` 中，避免在节点 `__init__` 里声明大量 ROS 参数。
 - **history 与回退逻辑**：
   - `0/1/2/4/5/6`：把当前槽位图片写入 `/history_image`，并向 reasoner 发 `cmd=request_next_group`
   - `3`：把所有 history 图像逐张打包回传给 reasoner
@@ -78,7 +78,7 @@
 
 节点在发送完 10 张图片后保持在线，可继续通过 `/history_control` 话题响应删除命令。
 
-与其对应，`SSVEP_Communication_Node.py` 的 reasoner 模式现在也复用了相同的 history 协议：
+与其对应，`SSVEP_Communication_Node2.py` 的 reasoner 模式现在也复用了相同的 history 协议：
 - 发布话题：`/history_image`
 - `frame_id`：`hist_id=<int>`
 - 删除控制：UDP `127.0.0.1:12001`
@@ -88,4 +88,3 @@
 - `eeg_processing`: 包含核心的业务逻辑，涵盖了实验流控制(Central Controller)、机器学习流水线(Pipelines)和部分与 Unity 交互的辅助工具。
 - `publisher_test`: 包含用于数据注入和测试的节点。除了 EEG 数据的 TCP 接收客户端外，还包含图像发布器 (`image_publisher.py`, `seg_image_publisher.py`) 和 UDP 发送器 (`udp_sender_node.py`)，通常用于模拟外部设备的输入。
 - `ROS-TCP-Endpoint`: 第三方/官方维护的桥接包，使 Unity 能够作为 ROS2 节点发送和接收消息。
-

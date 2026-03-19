@@ -45,7 +45,7 @@
    - **UDP Socket**: 为确保脑电打标与视觉刺激极高的时间对齐要求，Trigger 与精准 Timing 确认使用旁路 UDP 协议。
 5. **Reasoner 分组交互测试 (Reasoner Decode Loop)**:
    - 新增 `publisher_test/reasoner_publish_test.py`，可从 `~/Pictures/截图` 中按自然排序取前 24 张图片，切成 4 组，每组 6 张。
-   - `SSVEP_Communication_Node.py` 新增 `reasoner_mode_enabled`，可在 decode 模式下改用外部图片组驱动 `/image_seg`，并支持：
+   - `SSVEP_Communication_Node2.py` 可在 decode 模式下启用 reasoner 外部图片组驱动 `/image_seg`，并支持：
      - 双节点握手：`cmd=ssvep_ready` / `cmd=reasoner_ready`
      - 参数模拟选择：`mock_selected_index`
      - 普通选择写入 `/history_image`
@@ -89,12 +89,10 @@ ros2 run eeg_processing central_controller_ssvep_node4 --ros-args -p run_mode:=d
 # 5. 启动 reasoner 分组测试节点（按 24 张图分 4 组）
 ros2 run publisher_test reasoner_publish_test
 
-# 6. 启动 reasoner 版 decode 通信节点（若已注册 ssvep_communication_node 入口）
-ros2 run eeg_processing ssvep_communication_node --ros-args \
-  -p reasoner_mode_enabled:=true \
-  -p reasoner_input_topic:=/reasoner/images \
-  -p reasoner_output_topic:=/reasoner/feedback \
-  -p decode_command_topic:=/ssvep_decode_cmd
+# 6. 启动 reasoner 版 decode 通信节点（Node2）
+ros2 run eeg_processing ssvep_communication_node2 --ros-args \
+  -p run_mode:=decode \
+  -p reasoner_mode_enabled:=true
 ```
 
 ### 3. 测试与工具工具
@@ -108,7 +106,7 @@ ros2 run eeg_processing history_sender_node
 
 ### 4. Reasoner 测试模式说明
 
-`reasoner_publish_test.py` 与 `SSVEP_Communication_Node.py` 配合时，运行语义如下：
+`reasoner_publish_test.py` 与 `SSVEP_Communication_Node2.py` 配合时，运行语义如下：
 
 - 输入图片来源：`~/Pictures/截图` 前 24 张，按自然排序切为 4 组
 - 屏幕槽位布局：两行四列，第一行 `0 1 2 3`，第二行 `4 5 6 7`
@@ -129,7 +127,29 @@ ros2 run eeg_processing history_sender_node
 
 示例：
 ```bash
-ros2 param set /centrl_controller_ssvep_node4 mock_selected_index 0
+ros2 param set /central_controller_ssvep_node2 mock_selected_index 0
+```
+
+### 5. Node2 配置说明
+
+`SSVEP_Communication_Node2.py` 当前采用“静态配置 + 少量 ROS 覆盖”的方式：
+
+- 静态默认值：编辑 `src/eeg_processing/eeg_processing/ssvep_communication_node2_config.py`
+- 运行时可覆盖参数：
+  - `run_mode`
+  - `reasoner_mode_enabled`
+  - `mock_selected_index`
+  - `save_dir`
+  - `image_dir`
+  - `decode_max_trials`
+
+例如：
+
+```bash
+ros2 run eeg_processing ssvep_communication_node2 --ros-args \
+  -p run_mode:=pretrain \
+  -p save_dir:=data/central_controller_ssvep3 \
+  -p decode_max_trials:=1
 ```
 
 ## 目录结构 (Directory Structure)
@@ -153,21 +173,20 @@ ROS_Unity_test/
 1. **TCP 替代 UDP 接收**: 由于脑电采样率要求高，已废弃 UDP 脑电数据监听，全面升级为具有可靠粘包和缓存处理能力的 `eeg_tcp_listener_node`，保障了底层数据稳定。
 2. **Epoch 精准提取**: SSVEP V3 预训练节点废弃了“基于预设时间硬截断”的机制，重构为直接侦听 TCP 数据流内的 trigger 通道 (`trigger=1` 开始, `trigger=2` 结束)，完美解决了变长 Epoch 的网络时延导致的抖动问题。
 3. **Decode EEG 采集闭环**: `CentralControllerSSVEPNode4.py` 将 decode 模式升级为可发送 trigger、接收 EEG TCP 数据、保存 decode `.npy` 数据集，并写出 decode EEG trial/meta CSV。
-4. **统一通信配置区**: `Node4` 将 decode / pretrain 共用的通信参数统一整理为共享配置区，复用 Unity UDP 回执、Windows trigger 转发、Windows EEG TCP 链路。
+4. **Node2 静态配置抽离**: `SSVEP_Communication_Node2.py` 现已把大部分 decode / pretrain / reasoner / 网络默认配置移到 `ssvep_communication_node2_config.py`，只保留少数联调参数继续通过 ROS 覆盖。
 5. **验证工具补全**: 除 `validate_ssvep3_npy.py` 外，新增 `validate_ssvep4_npy.py`，用于绘制 decode 阶段的 EEG epoch 图（默认单 epoch）。
 6. **Reasoner 闭环测试**: 新增 24 图/4 组 reasoner 测试模式，支持握手、history 回传、撤销回退，以及 history 缩略图固定尺寸（默认 `100x100`）。
 7. **Decode 控制拆分与停闪保留画面**: 当前主链路把 decode 控制命令拆到 `/ssvep_decode_cmd`，并将 `stop/done` 改为“停止闪烁但保留当前图片，直到下一批覆盖”。
 
-## Node4 通信配置速览
-`CentralControllerSSVEPNode4.py` 当前将以下链路作为统一共享通信配置：
+## Node2 静态配置速览
+`SSVEP_Communication_Node2.py` 当前按设备而不是按模式组织默认网络配置：
 
-- Unity decode 回执 UDP：`decode_start_bind_ip` / `decode_start_port`
-- Unity pretrain 回执 UDP：`train_trigger_bind_ip` / `train_trigger_bind_port`
-- Windows trigger 转发：`trigger_local_ip` / `trigger_local_port` -> `trigger_remote_ip` / `trigger_remote_port`
-- Windows EEG TCP：`eeg_server_ip` / `eeg_server_port`
-- EEG 数据帧：`eeg_recv_buffer_size` / `eeg_n_channels` / `eeg_frame_floats` / `eeg_fs`
+- Unity 通信：`host_ip` + `decode_start_port` / `pretrain_start_port`
+- Windows trigger 转发：`local_ip` / `local_port` -> `remote_ip` / `remote_port`
+- Windows EEG TCP：`server_ip` / `server_port`
+- EEG 数据帧：`recv_buffer_size` / `n_channels` / `frame_floats` / `fs`
 
-默认主链路：
+默认主链路在 `ssvep_communication_node2_config.py` 中定义：
 - Ubuntu trigger 发送：`192.168.56.103:5006`
 - Windows COM 转发：`192.168.56.3:8888`
 - Windows EEG TCP：`192.168.56.3:8712`
@@ -187,4 +206,3 @@ python3 src/eeg_processing/eeg_processing/validate_ssvep4_npy.py
 - **代码规范**: Python 代码请严格遵循 PEP 8（推荐 4 空格缩进）并提供完整的 PEP 257 Docstring，支持使用 `ament_flake8` 和 `ament_pep257` 进行 Lint 检测。
 - **提交规范 (Commit)**: 建议一功能一提交，Summary 需使用明确的动词/祈使句（中英皆可，例如 `eeg_processing: 重构 epoch 边界检测逻辑`）。
 - **测试框架**: 使用 `pytest`，测试代码存放在各 Package 下的 `test/` 文件夹中。提 PR 前请确保 `colcon test` 无报错。
-

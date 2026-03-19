@@ -30,6 +30,20 @@
     * `_init_decode_ack_receiver()`
     * `_init_pretrain_ack_receiver()`
   * `def main(args=None)`
+* **`SSVEP_Communication_Node2.py`**
+  * `class CentralControllerSSVEPNode2(Node)`: 面向 decode/pretrain/reasoner 联调的通信节点，使用枚举状态机与试次状态数据类，并把大部分默认配置外移到静态配置模块。
+  * 关键内部方法：
+    * `_declare_runtime_parameters()`
+    * `_load_all_configs()`
+    * `_load_decode_config()`
+    * `_load_pretrain_config()`
+    * `_handle_decode_state()`
+    * `_handle_pretrain_state()`
+  * `def main(args=None)`
+* **`ssvep_communication_node2_config.py`**
+  * 配置类：`GeneralConfig`, `UnityCommConfig`, `TriggerForwardConfig`, `EEGServerConfig`, `DecodeConfig`, `PretrainConfig`, `ReasonerConfig`, `SSVEPCommunicationConfig`
+  * `DEFAULT_SSVEP_COMMUNICATION_CONFIG`: Node2 静态默认配置
+  * `def make_default_config()`: 返回深拷贝后的可变配置对象
 * **`CentralControllerSSVEPTrainNode.py`**
   * `class CircularEEGBuffer`: 环形缓冲区。
   * `class PendingCapture`: 记录待处理的数据捕获任务。

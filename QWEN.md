@@ -12,10 +12,11 @@ This is a **ROS2 (Robot Operating System 2) workspace** for a **Brain-Computer I
 - **TCP/UDP**: Hybrid communication for data streaming and time-critical triggers
 
 ### Current Mainline
-**`SSVEP_Communication_Node.py`** 是当前核心主线节点，基于 `CentralControllerSSVEPNode4` 演进而来，统一支持：
+当前维护中的联调通信主线为 **`SSVEP_Communication_Node2.py`**：
 - **decode 模式**：标准解码采集 + Reasoner 外部图片分组模式
 - **pretrain 模式**：预训练数据采集
 - **Reasoner 交互模式**：24图分组测试、双节点握手、history 回传/撤销
+- **配置策略**：大部分默认值来自 `ssvep_communication_node2_config.py`，只保留少量 ROS 参数用于运行时覆盖
 
 ### Architecture Summary
 ```
@@ -108,11 +109,10 @@ ros2 run eeg_processing history_sender_node
 # Reasoner group test (24 images / 4 groups)
 ros2 run publisher_test reasoner_publish_test
 
-# SSVEP Communication Node (reasoner mode)
-ros2 run eeg_processing ssvep_communication_node --ros-args \
-  -p reasoner_mode_enabled:=true \
-  -p reasoner_input_topic:=/reasoner/images \
-  -p reasoner_output_topic:=/reasoner/feedback
+# SSVEP Communication Node2 (reasoner mode)
+ros2 run eeg_processing ssvep_communication_node2 --ros-args \
+  -p run_mode:=decode \
+  -p reasoner_mode_enabled:=true
 ```
 
 ### Testing
@@ -151,6 +151,7 @@ python3 src/eeg_processing/eeg_processing/validate_ssvep4_npy.py
 | `central_controller_ssvep_train_node` | CentralControllerSSVEPTrainNode.py | SSVEP training data collector |
 | `history_sender_node` | history_sender.py | UDP state synchronization |
 | `ssvep_communication_node` | SSVEP_Communication_Node.py | Reasoner mode communication |
+| `ssvep_communication_node2` | SSVEP_Communication_Node2.py | Reasoner/decode/pretrain communication node with static config module |
 
 ### publisher_test Package
 | Entry Point | Module | Description |
@@ -192,6 +193,18 @@ python3 src/eeg_processing/eeg_processing/validate_ssvep4_npy.py
 | `/history_control` | `std_msgs/String` | History control commands |
 | `/reasoner/images` | Custom | Reasoner image batches |
 | `/reasoner/feedback` | Custom | Reasoner feedback commands |
+
+### Node2 Runtime Overrides
+
+`SSVEP_Communication_Node2.py` keeps only these ROS parameters at runtime:
+- `run_mode`
+- `reasoner_mode_enabled`
+- `mock_selected_index`
+- `save_dir`
+- `image_dir`
+- `decode_max_trials`
+
+All other defaults come from `src/eeg_processing/eeg_processing/ssvep_communication_node2_config.py`.
 
 ### UDP Ports (Time-Critical Triggers)
 | Port | Direction | Purpose |

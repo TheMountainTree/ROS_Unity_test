@@ -99,3 +99,37 @@
 - `3`：勾
 - `7`：叉
 - 动态图片槽位：`0/1/2/4/5/6`
+
+---
+
+## 📅 2026-03-19 增量：`SSVEP_Communication_Node2.py` 配置抽离与入口补齐
+
+本次在保留 2026-03-18 reasoner 交互能力的基础上，对 `SSVEP_Communication_Node2.py` 做了进一步工程化整理。
+
+### 新增能力
+
+- **静态配置模块**：新增 `ssvep_communication_node2_config.py`，把 decode / pretrain / reasoner / 网络默认配置从节点 `__init__` 中移出。
+- **按设备组织网络配置**：Unity、Windows trigger 转发、Windows EEG TCP 各自独立成配置组，不再按 decode/pretrain 重复声明相同 IP。
+- **精简 ROS 参数面**：Node2 只保留以下运行时覆盖项：
+  - `run_mode`
+  - `reasoner_mode_enabled`
+  - `mock_selected_index`
+  - `save_dir`
+  - `image_dir`
+  - `decode_max_trials`
+- **独立运行入口**：`setup.py` 新增 `ssvep_communication_node2`，可直接：
+
+```bash
+ros2 run eeg_processing ssvep_communication_node2 --ros-args -p run_mode:=decode
+```
+
+### 影响与约定
+
+- `reasoner_input_topic` / `reasoner_output_topic` / trigger 转发地址等不再默认通过 `--ros-args -p` 调整，而是在 `ssvep_communication_node2_config.py` 中修改。
+- `mock_selected_index` 仍保留为运行时参数，因此继续支持：
+
+```bash
+ros2 param set /central_controller_ssvep_node2 mock_selected_index 0
+```
+
+- pretrain 模式下 `trigger 1/2` 发送逻辑未改，仍在进入 `stim` 和 `rest` 状态时通过 UDP 发往 Windows COM 转发器。
