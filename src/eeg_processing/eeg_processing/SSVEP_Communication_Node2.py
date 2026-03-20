@@ -272,40 +272,14 @@ class CentralControllerSSVEPNode2(Node):
             raise ValueError("pretrain_repetitions_per_target must be > 0")
 
     def _reset_trial_state(self) -> None:
+        """Reset per-trial state by creating a fresh TrialState instance."""
         self.trial_state = TrialState()
-        self.current_trial_start_mono = self.trial_state.trial_start_mono
-        self.current_trial_prepared_wall = self.trial_state.prepared_wall
-        self.current_trial_start_wall = self.trial_state.start_wall
-        self.current_start_trial_id = self.trial_state.start_trial_id
-        self.current_start_status = self.trial_state.start_status
-        self.current_decode_stop_mono = self.trial_state.decode_stop_mono
-        self.current_epoch_mode = self.trial_state.epoch_mode
-        self.current_cue_start_wall = self.trial_state.cue_start_wall
-        self.current_stim_start_wall = self.trial_state.stim_start_wall
-        self.current_stim_end_wall = self.trial_state.stim_end_wall
-        self.current_trigger_received = self.trial_state.trigger_received
-        self.current_trigger_wall = self.trial_state.trigger_wall
-        self.current_stim_start_trigger_sent = self.trial_state.stim_start_trigger_sent
-        self.current_stim_end_trigger_sent = self.trial_state.stim_end_trigger_sent
-        self.current_stim_start_trigger_wall = self.trial_state.stim_start_trigger_wall
-        self.current_stim_end_trigger_wall = self.trial_state.stim_end_trigger_wall
-        self.current_stim_enter_abs = self.trial_state.stim_enter_abs
-        self.current_stim_exit_abs = self.trial_state.stim_exit_abs
-        self.current_stim_start_abs = self.trial_state.stim_start_abs
-        self.current_stim_end_abs_inclusive = self.trial_state.stim_end_abs_inclusive
-        self.current_raw_samples = self.trial_state.raw_samples
-        self.current_epoch_complete = self.trial_state.epoch_complete
-        self.current_epoch_saved = self.trial_state.epoch_saved
-        self.current_trial_record_written = self.trial_state.trial_record_written
-        self.last_trigger_value = self.trial_state.last_trigger_value
-        self.epoch_start_pending = self.trial_state.epoch_start_pending
 
     def _init_decode_state(self) -> None:
         base_dynamic_slots = [1, 2, 3, 5, 6, 7]
         self.decode_dynamic_target_ids = base_dynamic_slots[: self.decode_num_images]
         self.history_stack: List[Dict[str, object]] = []
         self.next_history_id = 0
-        self.previous_reasoner_group_images: List[Dict[str, object]] = []
         self.current_reasoner_group_images: List[Dict[str, object]] = []
         self.ready_reasoner_batches: List[List[Dict[str, object]]] = []
         self.reasoner_building_group_id = -1
@@ -601,6 +575,21 @@ class CentralControllerSSVEPNode2(Node):
                 self.get_logger().info("reasoner handshake complete")
             return
 
+        # Handle done command from reasoner
+        if cmd == "done":
+            self.get_logger().info(
+                f"reasoner done, selection finished, history_size={len(self.history_stack)}"
+            )
+            # Reset to IDLE state for potential new selection session
+            self.state = NodeState.INIT_WAIT
+            self.state_until = time.monotonic() + self.startup_delay
+            self.current_reasoner_group_images = []
+            self.ready_reasoner_batches = []
+            self.reasoner_building_group_id = -1
+            self.reasoner_building_images = {}
+            self.reasoner_building_meta = {}
+            return
+
         if msg.encoding != "bgr8" or msg.width <= 0 or msg.height <= 0:
             return
 
@@ -757,10 +746,21 @@ class CentralControllerSSVEPNode2(Node):
             self.state_until = time.monotonic() + max(0.0, self.decode_iti)
 
     def _handle_reasoner_selection(self, selection: int) -> None:
+        """Handle user selection in reasoner mode.
+        
+        Simplified logic: only handle display, history update, and send selection to reasoner.
+        The reasoner node decides what to do next (send next group, rollback, or finish).
+        
+        Slot mapping:
+        - 0, 1, 2, 4, 5, 6: Image selection (add to history)
+        - 3: Confirm selection (finish)
+        - 7: Rollback (delete last history item)
+        """
         if selection not in range(8):
             self.get_logger().warning(f"ignore invalid mock_selected_index={selection}")
             return
 
+        # Image selection: add to history and notify reasoner
         if selection in (0, 1, 2, 4, 5, 6):
             selected = self._slot_to_group_image(selection)
             if selected is None:
@@ -772,20 +772,16 @@ class CentralControllerSSVEPNode2(Node):
                 "selection_slot": selection,
                 "image": selected["image"],
                 "source_path": selected.get("source_path", ""),
+                "group": selected.get("group", -1),
+                "index": selected.get("index", -1),
             }
             self.history_stack.append(history_item)
             self._publish_history_image_msg(history_item["image"], history_item["history_id"])
-            self.previous_reasoner_group_images = [
-                {
-                    "group": item["group"],
-                    "index": item["index"],
-                    "source_path": item.get("source_path", ""),
-                    "image": item["image"].copy(),
-                }
-                for item in self.current_reasoner_group_images
-            ]
+            
+            # Notify reasoner about the selection
+            self._publish_reasoner_selection(selection, history_item)
+            
             self.current_reasoner_group_images = []
-            self._publish_reasoner_cmd("request_next_group")
             self.state = NodeState.REASONER_WAIT_BATCH
             self.get_logger().info(
                 f"selection slot={selection} accepted, history_id={history_item['history_id']}, "
@@ -793,53 +789,53 @@ class CentralControllerSSVEPNode2(Node):
             )
             return
 
+        # Confirm: notify reasoner that user finished selection
         if selection == 3:
-            history_total = len(self.history_stack)
-            if history_total == 0:
-                self.get_logger().info("selection slot=3, history is empty")
-            for idx, item in enumerate(self.history_stack):
-                msg = Image()
-                msg.header.stamp = self.get_clock().now().to_msg()
-                msg.header.frame_id = (
-                    f"kind=history_return;hist_id={item['history_id']};"
-                    f"source_path={os.path.basename(item.get('source_path', ''))};"
-                    f"end={1 if idx == history_total - 1 else 0}"
-                )
-                image = item["image"]
-                msg.height = int(image.shape[0])
-                msg.width = int(image.shape[1])
-                msg.encoding = "bgr8"
-                msg.step = int(image.shape[1] * 3)
-                msg.data = image.tobytes()
-                self.reasoner_pub.publish(msg)
-            self.get_logger().info(f"selection slot=3, returned history bundle size={history_total}")
-            self._start_next_decode_trial_with_current_images()
+            self._publish_reasoner_cmd("confirm")
+            self.get_logger().info(
+                f"selection slot=3 (confirm), history_size={len(self.history_stack)}, "
+                f"waiting for reasoner done"
+            )
+            # Wait for reasoner to send done command
+            self.state = NodeState.WAITING
+            self.state_until = 0.0  # No timeout, wait indefinitely for done
             return
 
+        # Rollback: delete last history item and notify reasoner
         if selection == 7:
             if not self.history_stack:
                 self.get_logger().warning("selection slot=7 ignored because history is empty")
                 return
-            if not self.previous_reasoner_group_images:
-                self.get_logger().warning("selection slot=7 ignored because previous group is unavailable")
-                return
-            self.history_stack.pop()
+            deleted_item = self.history_stack.pop()
             self._send_history_udp_command({"cmd": "delete_last"})
-            self.current_reasoner_group_images = [
-                {
-                    "group": item["group"],
-                    "index": item["index"],
-                    "source_path": item.get("source_path", ""),
-                    "image": item["image"].copy(),
-                }
-                for item in self.previous_reasoner_group_images
-            ]
-            self.base_images = [item["image"] for item in self.current_reasoner_group_images]
-            self.base_image_ids = list(range(1, len(self.current_reasoner_group_images) + 1))
+            
+            # Notify reasoner about the rollback
+            self._publish_reasoner_cmd("rollback")
+            
+            self.current_reasoner_group_images = []
+            self.state = NodeState.REASONER_WAIT_BATCH
             self.get_logger().info(
-                f"selection slot=7, rollback history_size={len(self.history_stack)}"
+                f"selection slot=7 (rollback), deleted history_id={deleted_item['history_id']}, "
+                f"history_size={len(self.history_stack)}, waiting reasoner to resend previous group"
             )
-            self._start_next_decode_trial_with_current_images()
+
+    def _publish_reasoner_selection(self, slot: int, history_item: Dict[str, object]) -> None:
+        """Publish selection result to reasoner."""
+        msg = Image()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = (
+            f"cmd=selection;slot={slot};"
+            f"history_id={history_item['history_id']};"
+            f"group={history_item.get('group', -1)};"
+            f"index={history_item.get('index', -1)};"
+            f"source_path={os.path.basename(str(history_item.get('source_path', '')))}"
+        )
+        msg.height = 1
+        msg.width = 1
+        msg.encoding = "bgr8"
+        msg.step = 3
+        msg.data = bytes([0, 0, 0])
+        self.reasoner_pub.publish(msg)
 
     def _to_decode_image(
         self, trial_id: int, img_idx_1based: int, image_id: int, target_id: int, freq: float
@@ -898,7 +894,7 @@ class CentralControllerSSVEPNode2(Node):
         self.publish_idx = 0
         self.next_publish_at = time.monotonic()
         self._reset_trial_state()
-        self.current_trial_prepared_wall = datetime.now().isoformat(timespec="milliseconds")
+        self.trial_state.prepared_wall = datetime.now().isoformat(timespec="milliseconds")
 
         # 从 8 个闪烁目标中选择当前解码目标；Unity 用该目标编号做触发标记。
         self.current_target_id = random.randint(1, self.num_targets)
@@ -920,7 +916,7 @@ class CentralControllerSSVEPNode2(Node):
 
         for slot_id, image_id, freq in self.current_trial_mapping:
             self.mapping_writer.writerow(
-                [self.trial_idx, slot_id, image_id, f"{freq:.3f}", self.current_trial_prepared_wall]
+                [self.trial_idx, slot_id, image_id, f"{freq:.3f}", self.trial_state.prepared_wall]
             )
         self.mapping_csv_file.flush()
 
@@ -947,26 +943,26 @@ class CentralControllerSSVEPNode2(Node):
                 continue
 
     def _finalize_decode_trial(self) -> None:
-        end_wall = self.current_stim_end_wall or datetime.now().isoformat(timespec="milliseconds")
-        if self.current_stim_end_wall == "":
-            self.current_stim_end_wall = end_wall
+        end_wall = self.trial_state.stim_end_wall or datetime.now().isoformat(timespec="milliseconds")
+        if self.trial_state.stim_end_wall == "":
+            self.trial_state.stim_end_wall = end_wall
         actual_s = 0.0
-        if self.current_trial_start_mono > 0.0:
-            stop_mono = self.current_decode_stop_mono if self.current_decode_stop_mono > 0.0 else time.monotonic()
-            actual_s = max(0.0, stop_mono - self.current_trial_start_mono)
+        if self.trial_state.trial_start_mono > 0.0:
+            stop_mono = self.trial_state.decode_stop_mono if self.trial_state.decode_stop_mono > 0.0 else time.monotonic()
+            actual_s = max(0.0, stop_mono - self.trial_state.trial_start_mono)
 
         self.trials_writer.writerow(
             [
                 self.trial_idx,
                 self.current_target_id,
                 f"{self.current_freq_hz:.3f}",
-                self.current_trial_prepared_wall,
-                self.current_trial_start_wall,
+                self.trial_state.prepared_wall,
+                self.trial_state.start_wall,
                 end_wall,
                 f"{self.decode_trial_duration_s:.3f}",
                 f"{actual_s:.3f}",
-                self.current_start_trial_id if self.current_start_trial_id > 0 else "",
-                self.current_start_status,
+                self.trial_state.start_trial_id if self.trial_state.start_trial_id > 0 else "",
+                self.trial_state.start_status,
             ]
         )
         self.trials_csv_file.flush()
@@ -984,21 +980,21 @@ class CentralControllerSSVEPNode2(Node):
 
     def _enter_decode_stimulating(self, now: float, start_status: str, start_trial_id: int) -> None:
         self.state = NodeState.DECODE_STIMULATING
-        self.current_trial_start_mono = now
-        self.current_trial_start_wall = datetime.now().isoformat(timespec="milliseconds")
-        self.current_start_trial_id = start_trial_id
-        self.current_start_status = start_status
-        self.current_stim_start_wall = self.current_trial_start_wall
-        self.current_stim_enter_abs = self.eeg_ring.latest_abs_index
-        self.current_epoch_mode = "decode"
-        self.current_stim_start_trigger_sent, self.current_stim_start_trigger_wall = self._send_trigger(1)
+        self.trial_state.trial_start_mono = now
+        self.trial_state.start_wall = datetime.now().isoformat(timespec="milliseconds")
+        self.trial_state.start_trial_id = start_trial_id
+        self.trial_state.start_status = start_status
+        self.trial_state.stim_start_wall = self.trial_state.start_wall
+        self.trial_state.stim_enter_abs = self.eeg_ring.latest_abs_index
+        self.trial_state.epoch_mode = "decode"
+        self.trial_state.stim_start_trigger_sent, self.trial_state.stim_start_trigger_wall = self._send_trigger(1)
 
     def _enter_decode_wait_capture(self, now: float) -> None:
         self._publish_decode_stop(self.trial_idx)
-        self.current_decode_stop_mono = now
-        self.current_stim_end_wall = datetime.now().isoformat(timespec="milliseconds")
-        self.current_stim_exit_abs = self.eeg_ring.latest_abs_index
-        self.current_stim_end_trigger_sent, self.current_stim_end_trigger_wall = self._send_trigger(2)
+        self.trial_state.decode_stop_mono = now
+        self.trial_state.stim_end_wall = datetime.now().isoformat(timespec="milliseconds")
+        self.trial_state.stim_exit_abs = self.eeg_ring.latest_abs_index
+        self.trial_state.stim_end_trigger_sent, self.trial_state.stim_end_trigger_wall = self._send_trigger(2)
         self.state = NodeState.DECODE_WAIT_CAPTURE
         self.state_until = now + max(0.0, self.decode_capture_wait_timeout_s)
 
@@ -1100,66 +1096,66 @@ class CentralControllerSSVEPNode2(Node):
             return False, wall
 
     def _process_eeg_trigger_sample(self, abs_index: int, trigger_value: int) -> None:
-        if trigger_value == self.last_trigger_value:
+        if trigger_value == self.trial_state.last_trigger_value:
             return
 
-        self.last_trigger_value = trigger_value
-        if self.current_epoch_mode is None:
+        self.trial_state.last_trigger_value = trigger_value
+        if self.trial_state.epoch_mode is None:
             return
 
         if trigger_value == 1:
-            if self.current_epoch_complete:
+            if self.trial_state.epoch_complete:
                 self.get_logger().warning(
                     f"[Trial {self.trial_idx}] ignore trigger=1 after completed epoch at abs={abs_index}"
                 )
                 return
-            if self.epoch_start_pending:
+            if self.trial_state.epoch_start_pending:
                 self.get_logger().warning(
                     f"[Trial {self.trial_idx}] duplicate trigger=1 ignored at abs={abs_index}"
                 )
                 return
-            self.current_stim_start_abs = int(abs_index)
-            self.epoch_start_pending = True
+            self.trial_state.stim_start_abs = int(abs_index)
+            self.trial_state.epoch_start_pending = True
             return
 
         if trigger_value == 2:
-            if not self.epoch_start_pending:
+            if not self.trial_state.epoch_start_pending:
                 self.get_logger().warning(
                     f"[Trial {self.trial_idx}] trigger=2 without open epoch at abs={abs_index}"
                 )
                 return
-            if self.current_epoch_complete:
+            if self.trial_state.epoch_complete:
                 self.get_logger().warning(
                     f"[Trial {self.trial_idx}] duplicate trigger=2 ignored at abs={abs_index}"
                 )
                 return
-            self.current_stim_end_abs_inclusive = int(abs_index)
-            self.current_epoch_complete = True
-            self.epoch_start_pending = False
+            self.trial_state.stim_end_abs_inclusive = int(abs_index)
+            self.trial_state.epoch_complete = True
+            self.trial_state.epoch_start_pending = False
             self._capture_epoch()
 
     def _capture_epoch(self) -> None:
-        self.current_epoch_saved = False
-        if self.current_stim_start_abs < 0 or self.current_stim_end_abs_inclusive < self.current_stim_start_abs:
+        self.trial_state.epoch_saved = False
+        if self.trial_state.stim_start_abs < 0 or self.trial_state.stim_end_abs_inclusive < self.trial_state.stim_start_abs:
             self.get_logger().warning(f"[Trial {self.trial_idx}] invalid epoch abs range")
             return
-        epoch_end_exclusive = self.current_stim_end_abs_inclusive + 1
-        if not self.eeg_ring.has_range(self.current_stim_start_abs, epoch_end_exclusive):
+        epoch_end_exclusive = self.trial_state.stim_end_abs_inclusive + 1
+        if not self.eeg_ring.has_range(self.trial_state.stim_start_abs, epoch_end_exclusive):
             self.get_logger().warning(
                 f"[Trial {self.trial_idx}] EEG range unavailable "
-                f"[{self.current_stim_start_abs}, {epoch_end_exclusive})"
+                f"[{self.trial_state.stim_start_abs}, {epoch_end_exclusive})"
             )
             return
         try:
-            raw = self.eeg_ring.get_range(self.current_stim_start_abs, epoch_end_exclusive)
+            raw = self.eeg_ring.get_range(self.trial_state.stim_start_abs, epoch_end_exclusive)
         except Exception as e:
             self.get_logger().warning(f"[Trial {self.trial_idx}] EEG epoch extraction failed: {e}")
             return
 
-        self.current_raw_samples = int(raw.shape[1])
+        self.trial_state.raw_samples = int(raw.shape[1])
         self.dataset_x.append(raw.astype(np.float32))
         self.dataset_y.append(int(self.current_target_id))
-        self.current_epoch_saved = True
+        self.trial_state.epoch_saved = True
 
         if self.run_mode == "pretrain":
             self.pretrain_meta_writer.writerow(
@@ -1167,12 +1163,12 @@ class CentralControllerSSVEPNode2(Node):
                     self.trial_idx,
                     self.current_target_id,
                     self.current_target_id,
-                    self.current_stim_start_wall,
-                    self.current_stim_end_wall,
-                    self.current_stim_start_abs,
-                    self.current_stim_end_abs_inclusive,
-                    self.current_raw_samples,
-                    int(self.current_epoch_complete),
+                    self.trial_state.stim_start_wall,
+                    self.trial_state.stim_end_wall,
+                    self.trial_state.stim_start_abs,
+                    self.trial_state.stim_end_abs_inclusive,
+                    self.trial_state.raw_samples,
+                    int(self.trial_state.epoch_complete),
                 ]
             )
             self.pretrain_meta_csv_file.flush()
@@ -1182,18 +1178,18 @@ class CentralControllerSSVEPNode2(Node):
                     self.trial_idx,
                     self.current_target_id,
                     self.current_target_id,
-                    self.current_stim_start_wall,
-                    self.current_stim_end_wall,
-                    self.current_stim_start_abs,
-                    self.current_stim_end_abs_inclusive,
-                    self.current_raw_samples,
-                    int(self.current_epoch_complete),
+                    self.trial_state.stim_start_wall,
+                    self.trial_state.stim_end_wall,
+                    self.trial_state.stim_start_abs,
+                    self.trial_state.stim_end_abs_inclusive,
+                    self.trial_state.raw_samples,
+                    int(self.trial_state.epoch_complete),
                 ]
             )
             self.decode_meta_csv_file.flush()
 
     def _write_mode_trial_row(self) -> None:
-        if self.current_trial_record_written:
+        if self.trial_state.trial_record_written:
             return
 
         if self.run_mode == "pretrain":
@@ -1202,22 +1198,22 @@ class CentralControllerSSVEPNode2(Node):
                     self.trial_idx,
                     self.current_target_id,
                     f"{self.current_freq_hz:.3f}",
-                    self.current_cue_start_wall,
-                    self.current_stim_start_wall,
-                    self.current_stim_end_wall,
-                    int(self.current_trigger_received),
-                    self.current_trigger_wall,
-                    int(self.current_stim_start_trigger_sent),
-                    self.current_stim_start_trigger_wall,
-                    int(self.current_stim_end_trigger_sent),
-                    self.current_stim_end_trigger_wall,
-                    self.current_stim_enter_abs,
-                    self.current_stim_exit_abs,
-                    self.current_stim_start_abs,
-                    self.current_stim_end_abs_inclusive,
-                    self.current_raw_samples,
-                    int(self.current_epoch_complete),
-                    int(self.current_epoch_saved),
+                    self.trial_state.cue_start_wall,
+                    self.trial_state.stim_start_wall,
+                    self.trial_state.stim_end_wall,
+                    int(self.trial_state.trigger_received),
+                    self.trial_state.trigger_wall,
+                    int(self.trial_state.stim_start_trigger_sent),
+                    self.trial_state.stim_start_trigger_wall,
+                    int(self.trial_state.stim_end_trigger_sent),
+                    self.trial_state.stim_end_trigger_wall,
+                    self.trial_state.stim_enter_abs,
+                    self.trial_state.stim_exit_abs,
+                    self.trial_state.stim_start_abs,
+                    self.trial_state.stim_end_abs_inclusive,
+                    self.trial_state.raw_samples,
+                    int(self.trial_state.epoch_complete),
+                    int(self.trial_state.epoch_saved),
                 ]
             )
             self.pretrain_csv_file.flush()
@@ -1227,25 +1223,25 @@ class CentralControllerSSVEPNode2(Node):
                     self.trial_idx,
                     self.current_target_id,
                     f"{self.current_freq_hz:.3f}",
-                    self.current_stim_start_wall,
-                    self.current_stim_end_wall,
-                    self.current_start_status,
-                    int(self.current_stim_start_trigger_sent),
-                    self.current_stim_start_trigger_wall,
-                    int(self.current_stim_end_trigger_sent),
-                    self.current_stim_end_trigger_wall,
-                    self.current_stim_enter_abs,
-                    self.current_stim_exit_abs,
-                    self.current_stim_start_abs,
-                    self.current_stim_end_abs_inclusive,
-                    self.current_raw_samples,
-                    int(self.current_epoch_complete),
-                    int(self.current_epoch_saved),
+                    self.trial_state.stim_start_wall,
+                    self.trial_state.stim_end_wall,
+                    self.trial_state.start_status,
+                    int(self.trial_state.stim_start_trigger_sent),
+                    self.trial_state.stim_start_trigger_wall,
+                    int(self.trial_state.stim_end_trigger_sent),
+                    self.trial_state.stim_end_trigger_wall,
+                    self.trial_state.stim_enter_abs,
+                    self.trial_state.stim_exit_abs,
+                    self.trial_state.stim_start_abs,
+                    self.trial_state.stim_end_abs_inclusive,
+                    self.trial_state.raw_samples,
+                    int(self.trial_state.epoch_complete),
+                    int(self.trial_state.epoch_saved),
                 ]
             )
             self.decode_eeg_csv_file.flush()
-        self.current_trial_record_written = True
-        self.current_epoch_mode = None
+        self.trial_state.trial_record_written = True
+        self.trial_state.epoch_mode = None
 
     def _save_mode_dataset(self) -> None:
         if self.run_mode not in ("pretrain", "decode") or self.dataset_saved:
@@ -1332,25 +1328,25 @@ class CentralControllerSSVEPNode2(Node):
         self.current_freq_hz = self.ssvep_frequencies[self.current_target_id - 1]
 
         self._reset_trial_state()
-        self.current_cue_start_wall = datetime.now().isoformat(timespec="milliseconds")
+        self.trial_state.cue_start_wall = datetime.now().isoformat(timespec="milliseconds")
 
         self._publish_pretrain_cmd("cue", self.trial_idx, self.current_target_id)
         self.state = NodeState.PRETRAIN_CUEING
         self.state_until = time.monotonic() + self.pretrain_cue_s
 
     def _enter_pretrain_stim(self) -> None:
-        self.current_stim_start_wall = datetime.now().isoformat(timespec="milliseconds")
-        self.current_stim_enter_abs = self.eeg_ring.latest_abs_index
-        self.current_epoch_mode = "pretrain"
-        self.current_stim_start_trigger_sent, self.current_stim_start_trigger_wall = self._send_trigger(1)
+        self.trial_state.stim_start_wall = datetime.now().isoformat(timespec="milliseconds")
+        self.trial_state.stim_enter_abs = self.eeg_ring.latest_abs_index
+        self.trial_state.epoch_mode = "pretrain"
+        self.trial_state.stim_start_trigger_sent, self.trial_state.stim_start_trigger_wall = self._send_trigger(1)
         self._publish_pretrain_cmd("stim", self.trial_idx, self.current_target_id)
         self.state = NodeState.PRETRAIN_STIMULATING
         self.state_until = time.monotonic() + self.pretrain_stim_s
 
     def _enter_pretrain_rest(self) -> None:
-        self.current_stim_end_wall = datetime.now().isoformat(timespec="milliseconds")
-        self.current_stim_exit_abs = self.eeg_ring.latest_abs_index
-        self.current_stim_end_trigger_sent, self.current_stim_end_trigger_wall = self._send_trigger(2)
+        self.trial_state.stim_end_wall = datetime.now().isoformat(timespec="milliseconds")
+        self.trial_state.stim_exit_abs = self.eeg_ring.latest_abs_index
+        self.trial_state.stim_end_trigger_sent, self.trial_state.stim_end_trigger_wall = self._send_trigger(2)
         self._publish_pretrain_cmd("rest", self.trial_idx, self.current_target_id)
 
         self.state = NodeState.PRETRAIN_RESTING
@@ -1472,12 +1468,12 @@ class CentralControllerSSVEPNode2(Node):
             return
 
         if self.state == NodeState.DECODE_STIMULATING:
-            if now - self.current_trial_start_mono >= self.decode_trial_duration_s:
+            if now - self.trial_state.trial_start_mono >= self.decode_trial_duration_s:
                 self._enter_decode_wait_capture(now)
             return
 
         if self.state == NodeState.DECODE_WAIT_CAPTURE:
-            if self.current_epoch_complete or now >= self.state_until:
+            if self.trial_state.epoch_complete or now >= self.state_until:
                 self._write_mode_trial_row()
                 self._finalize_decode_trial()
             return
@@ -1496,11 +1492,11 @@ class CentralControllerSSVEPNode2(Node):
 
         if self.state == NodeState.PRETRAIN_STIMULATING:
             trig = self._poll_pretrain_trigger()
-            if trig is not None and not self.current_trigger_received:
+            if trig is not None and not self.trial_state.trigger_received:
                 trial_id, target_id, wall = trig
                 if trial_id == self.trial_idx:
-                    self.current_trigger_received = True
-                    self.current_trigger_wall = wall
+                    self.trial_state.trigger_received = True
+                    self.trial_state.trigger_wall = wall
                     if target_id > 0:
                         self.current_target_id = target_id
                         self.current_freq_hz = self.ssvep_frequencies[self.current_target_id - 1]
