@@ -54,7 +54,7 @@ class ReasonerPublishTestNode(Node):
 
         self.declare_parameter(
             "image_dir",
-            os.path.expanduser("~/Pictures/截图"),
+            os.path.expanduser("~/图片/截图"),
             descriptor=desc("Image directory, naturally sorted, first 24 images used."),
         )
         self.declare_parameter(

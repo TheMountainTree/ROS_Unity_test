@@ -10,6 +10,11 @@ This repository is a ROS2 workspace for Unity-integrated BCI workflows.
 - `src/eeg_processing/eeg_processing/utils.py`: shared SSVEP utility module for thread-safe EEG ring buffers, enum-based node states, and per-trial state dataclasses.
 - `src/eeg_processing/eeg_processing/ssvep_communication_node2_config.py`: static config module for `SSVEP_Communication_Node2.py`; edit defaults here instead of expanding ROS parameter declarations.
 - `src/eeg_processing/eeg_processing/SSVEP_Communication_Node2.py`: refactored SSVEP communication node that keeps decode/pretrain behavior, reads most defaults from the config module, and only exposes a small runtime override surface through ROS parameters.
+- `src/eeg_processing/eeg_processing/SSVEP_Communication_Node3.py`: modular SSVEP communication node; keep only node wiring (parameters, pub/sub, timer dispatch, lifecycle cleanup) in this file.
+- `src/eeg_processing/eeg_processing/decode.py`: decode-mode module for trial preparation, image publication, decode command publishing, and decode state transitions.
+- `src/eeg_processing/eeg_processing/pretrain.py`: pretrain-mode module plus shared EEG TCP/trigger/epoch capture and dataset persistence logic used by decode/pretrain.
+- `src/eeg_processing/eeg_processing/reasoner.py`: reasoner handshake, grouped image intake, history publishing, and selection/rollback command flow.
+- `src/eeg_processing/eeg_processing/ssvep_communication_node3_config.py`: static defaults for Node3 (general/unity/trigger/eeg/decode/pretrain/reasoner); keep runtime override surface minimal.
 - `src/publisher_test/`: utility/test publishers, UDP trigger sender, TCP listener.
 - `src/ROS-TCP-Endpoint/`: Unity ROS TCP bridge package (`ros_tcp_endpoint`).
 - `data/`: recorded trials, mappings, and generated datasets/plots.
@@ -34,6 +39,8 @@ Run from workspace root:
 - For new SSVEP controller work, prefer shared helpers from `eeg_processing/utils.py` over redefining buffer/state helpers inside each node file.
 - New controller state machines should use `NodeState` enums and trial reset helpers instead of ad hoc string literals and repeated field reinitialization.
 - For `SSVEP_Communication_Node2.py`, static defaults belong in `ssvep_communication_node2_config.py`; only high-frequency runtime toggles such as mode/reasoner/debug overrides should remain as ROS parameters.
+- For `SSVEP_Communication_Node3.py`, keep the same small ROS parameter surface (`run_mode`, `reasoner_mode_enabled`, `mock_selected_index`, `save_dir`, `image_dir`, `decode_max_trials`) and put all other defaults in `ssvep_communication_node3_config.py`.
+- For Node3 maintenance, prefer editing behavior in `decode.py` / `pretrain.py` / `reasoner.py` and avoid moving mode logic back into the main node file.
 - Console entry points should remain explicit and task-oriented (see each package `setup.py`).
 
 ## Testing Guidelines
