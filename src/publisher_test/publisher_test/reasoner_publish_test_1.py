@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Reasoner node for SSVEP image selection workflow.
+"""Reasoner node for SSVEP image selection workflow (v1).
 
 This node manages image groups and handles user selection feedback from SSVEP.
 
 Protocol:
-- Reasoner -> SSVEP: Image groups (6 images per group)
+- Reasoner -> SSVEP: Image groups (6/5/4/3)
+- Reasoner -> SSVEP: cmd=batch_start/cmd=batch_end (group envelope)
 - Reasoner -> SSVEP: cmd=done (selection finished)
 - SSVEP -> Reasoner: cmd=selection;slot=X (user selected an image)
 - SSVEP -> Reasoner: cmd=rollback (user wants to redo previous selection)
 - SSVEP -> Reasoner: cmd=confirm (user confirmed all selections)
 
 Workflow:
-1. Reasoner sends first group of 6 images
+1. Reasoner sends first group
 2. User selects an image (slot 0,1,2,4,5,6) -> Reasoner records and sends next group
 3. User selects rollback (slot 7) -> Reasoner resends previous group
 4. User selects confirm (slot 3) -> Reasoner prints all selections and sends cmd=done
@@ -19,7 +20,7 @@ Workflow:
 
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -49,13 +50,13 @@ class ReasonerPublishTestNode(Node):
     """Manage image groups and handle user selection feedback from SSVEP."""
 
     def __init__(self):
-        super().__init__("reasoner_publish_test")
+        super().__init__("reasoner_publish_test_1")
         desc = lambda text: ParameterDescriptor(description=text)
 
         self.declare_parameter(
             "image_dir",
-            os.path.expanduser("~/图片/截图"),
-            descriptor=desc("Image directory, naturally sorted, first 24 images used."),
+            os.path.expanduser("~/Pictures/截图"),
+            descriptor=desc("Image directory, naturally sorted, first 18 images used."),
         )
         self.declare_parameter(
             "input_topic",
@@ -140,17 +141,20 @@ class ReasonerPublishTestNode(Node):
             return None
 
     def _load_groups(self) -> List[List[Dict[str, object]]]:
-        """Load 24 images into 4 groups of 6 images each."""
-        image_paths = self._collect_image_paths(self.image_dir)[:24]
-        if len(image_paths) < 24:
+        """Load 18 images into 4 groups: 6, 5, 4, 3."""
+        group_sizes = [6, 5, 4, 3]
+        required_total = sum(group_sizes)
+        image_paths = self._collect_image_paths(self.image_dir)[:required_total]
+        if len(image_paths) < required_total:
             raise RuntimeError(
-                f"Reasoner requires at least 24 images, found {len(image_paths)} in {self.image_dir}"
+                f"Reasoner requires at least {required_total} images, found {len(image_paths)} in {self.image_dir}"
             )
 
         groups: List[List[Dict[str, object]]] = []
-        for group_idx in range(4):
+        cursor = 0
+        for group_idx, group_size in enumerate(group_sizes):
             group: List[Dict[str, object]] = []
-            for local_idx, path in enumerate(image_paths[group_idx * 6 : (group_idx + 1) * 6]):
+            for local_idx, path in enumerate(image_paths[cursor: cursor + group_size]):
                 bgr = self._read_image_bgr(path)
                 if bgr is None:
                     raise RuntimeError(f"Failed to load required image: {path}")
@@ -163,6 +167,7 @@ class ReasonerPublishTestNode(Node):
                     }
                 )
             groups.append(group)
+            cursor += group_size
         return groups
 
     def _make_image_msg(self, image: np.ndarray, frame_id: str) -> Image:
@@ -176,11 +181,14 @@ class ReasonerPublishTestNode(Node):
         msg.data = image.tobytes()
         return msg
 
-    def _publish_cmd(self, cmd: str) -> None:
+    def _publish_cmd(self, cmd: str, **meta: object) -> None:
         """Publish a command message to SSVEP."""
         msg = Image()
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = f"cmd={cmd}"
+        frame_parts = [f"cmd={cmd}"]
+        for key, value in meta.items():
+            frame_parts.append(f"{key}={value}")
+        msg.header.frame_id = ";".join(frame_parts)
         msg.height = 1
         msg.width = 1
         msg.encoding = "bgr8"
@@ -190,23 +198,29 @@ class ReasonerPublishTestNode(Node):
         self.get_logger().info(f"Sent command: {cmd}")
 
     def publish_group(self, group_idx: int) -> None:
-        """Publish a group of 6 images to SSVEP."""
+        """Publish one image group to SSVEP."""
         if group_idx < 0 or group_idx >= len(self.groups):
             self.get_logger().warning(f"Requested out-of-range group={group_idx}")
             return
-        
+
         group = self.groups[group_idx]
+        group_count = len(group)
         self.current_group_idx = group_idx
-        
+
+        self._publish_cmd("batch_start", group=group_idx, count=group_count)
         for item in group:
             frame_id = (
                 f"source=reasoner;group={group_idx};index={item['index']};"
                 f"image_path={os.path.basename(str(item['path']))};"
+                f"count={group_count};"
                 f"end={1 if int(item['index']) == len(group) - 1 else 0}"
             )
             self.publisher_.publish(self._make_image_msg(item["image"], frame_id))
-        
-        self.get_logger().info(f"Published group {group_idx + 1}/{len(self.groups)}")
+        self._publish_cmd("batch_end", group=group_idx, count=group_count)
+
+        self.get_logger().info(
+            f"Published group {group_idx + 1}/{len(self.groups)} with {group_count} images"
+        )
 
     def _parse_frame_id(self, frame_id: str) -> Dict[str, str]:
         out: Dict[str, str] = {}

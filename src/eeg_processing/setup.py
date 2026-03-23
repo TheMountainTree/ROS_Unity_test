@@ -37,6 +37,8 @@ setup(
             "history_sender_node = eeg_processing.history_sender:main",
             "ssvep_communication_node = eeg_processing.SSVEP_Communication_Node:main",
             "ssvep_communication_node2 = eeg_processing.SSVEP_Communication_Node2:main",
+            "ssvep_communication_node3 = eeg_processing.SSVEP_Communication_Node3:main",
+            "ssvep_communication_node3_1 = eeg_processing.SSVEP_Communication_Node3_1:main",
         ],
     },
 )

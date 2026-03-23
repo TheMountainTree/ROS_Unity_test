@@ -93,6 +93,11 @@ ros2 run publisher_test reasoner_publish_test
 ros2 run eeg_processing ssvep_communication_node2 --ros-args \
   -p run_mode:=decode \
   -p reasoner_mode_enabled:=true
+
+# 7. 启动模块化通信节点（Node3）
+ros2 run eeg_processing ssvep_communication_node3 --ros-args \
+  -p run_mode:=decode \
+  -p reasoner_mode_enabled:=true
 ```
 
 ### 3. 测试与工具工具
@@ -127,7 +132,7 @@ ros2 run eeg_processing history_sender_node
 
 示例：
 ```bash
-ros2 param set /central_controller_ssvep_node2 mock_selected_index 0
+ros2 param set /central_controller_ssvep_node3 mock_selected_index 0
 ```
 
 ### 5. Node2 配置说明
@@ -150,6 +155,34 @@ ros2 run eeg_processing ssvep_communication_node2 --ros-args \
   -p run_mode:=pretrain \
   -p save_dir:=data/central_controller_ssvep3 \
   -p decode_max_trials:=1
+```
+
+### 6. Node3 模块化配置说明
+
+`SSVEP_Communication_Node3.py` 在保持 Node2 行为一致的前提下，按模块拆分为：
+
+- `decode.py`：decode 状态机与图像发布逻辑
+- `pretrain.py`：pretrain 状态机与共享 EEG/epoch 采集逻辑
+- `reasoner.py`：reasoner 握手、分组、selection/rollback 逻辑
+- `SSVEP_Communication_Node3.py`：主节点初始化、调度、清理
+
+Node3 同样采用“静态配置 + 少量 ROS 覆盖”：
+
+- 静态默认值：编辑 `src/eeg_processing/eeg_processing/ssvep_communication_node3_config.py`
+- 运行时可覆盖参数：
+  - `run_mode`
+  - `reasoner_mode_enabled`
+  - `mock_selected_index`
+  - `save_dir`
+  - `image_dir`
+  - `decode_max_trials`
+
+例如：
+
+```bash
+ros2 run eeg_processing ssvep_communication_node3 --ros-args \
+  -p run_mode:=decode \
+  -p reasoner_mode_enabled:=true
 ```
 
 ## 目录结构 (Directory Structure)
@@ -177,6 +210,7 @@ ROS_Unity_test/
 5. **验证工具补全**: 除 `validate_ssvep3_npy.py` 外，新增 `validate_ssvep4_npy.py`，用于绘制 decode 阶段的 EEG epoch 图（默认单 epoch）。
 6. **Reasoner 闭环测试**: 新增 24 图/4 组 reasoner 测试模式，支持握手、history 回传、撤销回退，以及 history 缩略图固定尺寸（默认 `100x100`）。
 7. **Decode 控制拆分与停闪保留画面**: 当前主链路把 decode 控制命令拆到 `/ssvep_decode_cmd`，并将 `stop/done` 改为“停止闪烁但保留当前图片，直到下一批覆盖”。
+8. **Node3 模块化重构**: 新增 `SSVEP_Communication_Node3.py` 与 `decode.py / pretrain.py / reasoner.py`，主节点仅保留初始化与调度，配置默认值集中到 `ssvep_communication_node3_config.py`。
 
 ## Node2 静态配置速览
 `SSVEP_Communication_Node2.py` 当前按设备而不是按模式组织默认网络配置：

@@ -42,6 +42,11 @@ ros2 run eeg_processing ssvep_communication_node2 --ros-args \
   -p run_mode:=decode \
   -p reasoner_mode_enabled:=true
 
+# Reasoner communication node3 (modular version)
+ros2 run eeg_processing ssvep_communication_node3 --ros-args \
+  -p run_mode:=decode \
+  -p reasoner_mode_enabled:=true
+
 # Reasoner image batch test publisher
 ros2 run publisher_test reasoner_publish_test
 
@@ -92,7 +97,7 @@ ros2 run eeg_processing history_sender_node
 - Core BCI processing nodes
 - **CentralControllerSSVEPNode3**: Pretrain-focused node with EEG TCP + trigger-based epoch extraction
 - **CentralControllerSSVEPNode4**: Unified node supporting both decode and pretrain, with unified communication config
-- **SSVEP_Communication_Node2**: Reasoner/decode/pretrain communication node with static config defaults in `ssvep_communication_node2_config.py`
+- **SSVEP_Communication_Node2/Node3**: Reasoner/decode/pretrain communication nodes with static config defaults
 - **ssvep_pipeline.py**: eTRCA algorithm (requires training data)
 - **ssvep_processing_fbcca.py**: FBCCA algorithm (zero-training, reference signals only)
 
@@ -118,19 +123,18 @@ ros2 run eeg_processing history_sender_node
    - Triggers recorded via UDP: trigger 1 (stim start), trigger 2 (stim end)
    - Epoch extraction based on trigger channel in TCP stream
 
-3. **Reasoner Mode (SSVEP_Communication_Node2)**:
+3. **Reasoner Mode (SSVEP_Communication_Node2/Node3)**:
    - External node provides image batches via `/reasoner/images`
    - Handshake: `ssvep_ready` ↔ `reasoner_ready` before trial flow
    - Slot layout: row 0 = `0,1,2,3`, row 1 = `4,5,6,7` (3=checkmark, 7=X)
    - `mock_selected_index` parameter simulates user selection
-   - Only a small runtime override set remains as ROS params: `run_mode`, `reasoner_mode_enabled`, `mock_selected_index`, `save_dir`, `image_dir`, `decode_max_trials`
 
 ### ROS Topics
 
 - `/image_seg`: Image batch for SSVEP (6 images per trial, frame_id contains trial/target metadata)
 - `/ssvep_train_cmd`: Training commands for pretrain mode (cue/stim/rest/done)
 - `/ssvep_decode_cmd`: Control commands for decode mode (prepare/stim/stop/done)
-- `/history_image`: History images for Unity display (100x100 thumbnails)
+- `/history_image`: History images for Unity display (default 120x120 thumbnails)
 - `/reasoner/images`: External image batch input for reasoner mode
 - `/reasoner/feedback`: Feedback to reasoner node
 
@@ -142,13 +146,25 @@ ros2 run eeg_processing history_sender_node
 - Windows COM forwarder: `192.168.56.3:8888`
 - Windows EEG TCP: `192.168.56.3:8712`
 
-### Node2 Static Config
+### SSVEP Communication Nodes
 
-`SSVEP_Communication_Node2.py` now reads most defaults from:
+**SSVEP_Communication_Node2** and **SSVEP_Communication_Node3** are modular nodes supporting decode/pretrain with optional reasoner integration.
 
-- `src/eeg_processing/eeg_processing/ssvep_communication_node2_config.py`
+- Static config files: `ssvep_communication_node2_config.py` / `ssvep_communication_node3_config.py`
+- Node3 is modular: `decode.py` + `pretrain.py` + `reasoner.py` + main node
+- Runtime ROS parameter overrides: `run_mode`, `reasoner_mode_enabled`, `mock_selected_index`, `save_dir`, `image_dir`, `decode_max_trials`
 
-Runtime ROS parameter overrides are intentionally limited to a small set for联调 convenience.
+```bash
+# Node2
+ros2 run eeg_processing ssvep_communication_node2 --ros-args \
+  -p run_mode:=decode \
+  -p reasoner_mode_enabled:=true
+
+# Node3 (modular version)
+ros2 run eeg_processing ssvep_communication_node3 --ros-args \
+  -p run_mode:=decode \
+  -p reasoner_mode_enabled:=true
+```
 
 ### EEG Data Format
 
@@ -159,9 +175,14 @@ Ch1(4B) -> Ch2(4B) -> ... -> ChN(4B) -> Trigger(4B) -> Next Ch1...
 
 Last float32 in each frame is the trigger channel (1=stim start, 2=stim end).
 
-## Validation Tools
+Default EEG parameters: 8 channels, 1000 Hz sampling rate, 9 floats per frame (8 channels + trigger).
+
+## Validation & Testing
 
 ```bash
+# Run ROS2 package tests
+colcon test --packages-select eeg_processing
+
 # Validate pretrain data (Node3)
 python3 src/eeg_processing/eeg_processing/validate_ssvep3_npy.py
 
@@ -176,6 +197,13 @@ python3 src/eeg_processing/eeg_processing/validate_ssvep4_npy.py
 - brainda (brainda module for SSVEP eTRCA algorithm)
 - MNE (optional, for P300 data loading)
 
+## Data Output
+
+Generated data is stored under `data/`:
+- `data/central_controller_ssvep3/` - Node3/Node2 outputs
+- `data/central_controller_ssvep_node3/` - Node3 communication node outputs
+- Files: `*_dataset_*.npy` (EEG epochs), `*_trials_*.csv` (trial info), `*_metadata_*.csv` (metadata), `plots/` (validation plots)
+
 ## SSVEP Algorithm Notes
 
 The codebase implements two SSVEP decoding approaches:
@@ -185,6 +213,8 @@ The codebase implements two SSVEP decoding approaches:
 2. **FBCCA** in `ssvep_processing_fbcca.py`: Filter-Bank Standard CCA - uses sinusoidal reference signals, no training required.
 
 Both use filterbank decomposition with configurable passbands.
+
+Default SSVEP frequencies (8 targets): `[8.0, 10.0, 12.0, 15.0, 20.0, 30.0, 40.0, 45.0]` Hz
 
 ## Image Coordinate Note
 

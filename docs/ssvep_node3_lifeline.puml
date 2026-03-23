@@ -1,0 +1,124 @@
+@startuml SSVEP_Communication_Node3_Decode_Flow
+
+!theme plain
+skinparam sequence {
+    ArrowColor Black
+    LifeLineBorderColor Black
+    ParticipantBorderColor Black
+    ParticipantBackgroundColor White
+}
+
+title SSVEP_Communication_Node3 - Decode Mode Sequence Diagram
+
+participant "reasoner" as R
+participant "CentralNode\n(Node3)" as CN
+participant "Unity" as U
+participant "EEG Server" as EEG
+
+== 1. Image Preparation (Reasoner Mode Only) ==
+opt reasoner_mode_enabled
+    R -> CN: Send 6 images via /reasoner/input_images
+    note right
+        frame_id contains:
+        cmd=, group=, index=, end=1
+    end note
+    CN -> CN: Buffer images in ready_reasoner_batches
+end
+
+== 2. Trial Preparation ==
+CN -> CN: _prepare_decode_trial()
+note right
+    - Increment trial_idx
+    - Select random target_id
+    - Build current_trial_mapping
+    - Write mapping CSV
+end note
+
+== 3. Image Publishing (DECODE_PUBLISHING) ==
+loop 6 times (decode_num_images)
+    CN -> U: Publish image via /ssvep_images
+    note right
+        frame_id:
+        trial=;img=;image_id=;
+        target=;freq=;dur=
+    end note
+end
+
+== 4. Hold & Prepare (DECODE_HOLD) ==
+CN -> CN: Wait decode_pre_stim_hold_s
+CN -> U: cmd=prepare via /decode_command
+
+== 5. Wait for Unity Start (DECODE_WAIT_START) ==
+CN -> CN: _poll_decode_trial_started()
+alt UDP received: trial_started={trial_id}
+    U --> CN: UDP trial_started ack
+else Timeout
+    CN -> CN: timeout_force_start
+end
+
+== 6. Stimulation Start (DECODE_STIMULATING) ==
+CN -> U: cmd=stim via /decode_command
+CN -> EEG: _send_trigger(1)
+note right
+    Send UDP trigger value=1
+    to mark stimulation start
+end note
+CN -> EEG: Continuous EEG TCP streaming
+note right
+    eeg_ring buffer captures
+    data for epoch extraction
+end note
+
+== 7. Trial Duration ==
+CN -> CN: Wait decode_trial_duration_s
+
+== 8. Stimulation End ==
+CN -> U: cmd=stop via /decode_command
+CN -> EEG: _send_trigger(2)
+note right
+    Send UDP trigger value=2
+    to mark stimulation end
+end note
+
+== 9. Epoch Capture (DECODE_WAIT_CAPTURE) ==
+CN -> CN: Extract epoch from eeg_ring
+note right
+    - stim_enter_abs to stim_exit_abs
+    - Write decode_eeg_csv
+    - Write decode_meta_csv
+end note
+
+== 10. Trial Finalization ==
+CN -> CN: _finalize_decode_trial()
+CN -> CN: Write trials_csv
+
+== 11. Next Trial or Selection (Reasoner Mode) ==
+alt reasoner_mode_enabled
+    CN -> CN: State = REASONER_WAIT_SELECTION
+    CN -> CN: Wait for mock_selected_index
+    
+    alt Selection 0,1,2,4,5,6 (image select)
+        CN -> CN: Add to history_stack
+        CN -> R: cmd=selection via /reasoner/output
+        CN -> CN: State = REASONER_WAIT_BATCH
+    else Selection 3 (confirm)
+        CN -> R: cmd=confirm
+        CN -> CN: State = WAITING (ITI)
+    else Selection 7 (rollback)
+        CN -> CN: Pop history_stack
+        CN -> R: cmd=rollback
+        CN -> CN: State = REASONER_WAIT_BATCH
+    end
+else Normal Mode
+    CN -> CN: State = WAITING
+    CN -> CN: Wait decode_iti
+    CN -> CN: Next trial (_prepare_decode_trial)
+end
+
+== 12. Session End ==
+opt max_trials reached or done
+    CN -> U: cmd=done via /decode_command
+    CN -> CN: _save_mode_dataset()
+end
+
+@enduml

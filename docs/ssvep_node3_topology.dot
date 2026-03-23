@@ -1,0 +1,56 @@
+digraph SSVEP_Node3_Topology {
+  graph [rankdir=LR, fontsize=12, fontname="Noto Sans CJK SC"];
+  node  [shape=box, style="rounded,filled", color="#333333", fillcolor="#f7f7f7", fontname="Noto Sans CJK SC"];
+  edge  [color="#444444", fontname="Noto Sans CJK SC", fontsize=10];
+
+  subgraph cluster_ubuntu {
+    label="Ubuntu ROS2 主机";
+    color="#aaaaaa";
+
+    node3 [label="ssvep_communication_node3\nSSVEP_Communication_Node3.py"];
+    reasoner [label="reasoner_publish_test\n/reasoner/images + /reasoner/feedback"];
+    endpoint [label="ros_tcp_endpoint\nTCP Server 0.0.0.0:10000"];
+  }
+
+  subgraph cluster_unity {
+    label="Unity 主机";
+    color="#aaaaaa";
+
+    stim [label="SSVEP_Stimulus2.cs\n订阅 /image_seg /ssvep_decode_cmd /ssvep_train_cmd"];
+  }
+
+  subgraph cluster_windows {
+    label="Windows 采集/转发机";
+    color="#aaaaaa";
+
+    udp2com [label="udp2com 转发器\nwindows_com_publisher.py\nUDP 8888 -> COM3"];
+    nn [label="NeuroNexus TCP 转发服务\nTCP 8712"];
+  }
+
+  sync [label="多参数同步器"];
+  cap  [label="脑电帽"];
+  amp  [label="放大器"];
+  router [label="路由器"];
+
+  node3 -> reasoner [label="ROS2 /reasoner/feedback\nsensor_msgs/Image\ncmd=ssvep_ready/selection/rollback/confirm"];
+  reasoner -> node3 [label="ROS2 /reasoner/images\nsensor_msgs/Image\n图像组 + cmd=reasoner_ready/done"];
+
+  node3 -> endpoint [label="ROS2 /image_seg\nsensor_msgs/Image(bgr8)"];
+  node3 -> endpoint [label="ROS2 /ssvep_decode_cmd\ncmd=prepare/stim/stop/done"];
+  node3 -> endpoint [label="ROS2 /ssvep_train_cmd\ncmd=cue/stim/rest/stop/done"];
+
+  endpoint -> stim [dir=both, label="TCP 10000\nROS-TCP-Connector 协议\n<len><dest><len><serialized_ros_msg>"];
+
+  stim -> node3 [label="UDP 文本 -> 10000\ntrial_started=<trial_id>"];
+  stim -> node3 [label="UDP 文本 -> 10001\ntrial_start=<trial_id>;target=<target_id>"];
+
+  node3 -> udp2com [label="UDP uint8 触发\n5006 -> 8888\n(trigger:1/2...)"];
+  udp2com -> sync [label="USB 串口\nDCP: 01 E1 01 00 <trigger>"];
+
+  nn -> node3 [label="TCP 8712\n小端 float32 帧(9)\n8 EEG + 1 Trigger"];
+
+  amp -> router [label="WiFi"];
+  router -> nn [label="WiFi"];
+  sync -> cap [label="触点"];
+  cap -> amp [label="触点"];
+}
