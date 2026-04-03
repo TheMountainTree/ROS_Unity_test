@@ -711,6 +711,10 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
         {
             activeDecodeFrameIndices.Add(decodeImageIndices[i]);
         }
+        // Confirm/rollback slots (3/7) are always available for decode flashing,
+        // independent of dynamic image batch size.
+        activeDecodeFrameIndices.Add(3);
+        activeDecodeFrameIndices.Add(7);
     }
 
     bool IsDecodeFrameActive(int frameIndex)
