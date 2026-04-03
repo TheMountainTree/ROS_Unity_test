@@ -23,7 +23,7 @@ class CentralControllerSSVEPNode3(DecodeModule, PretrainModule, ReasonerModule, 
     """Unified SSVEP controller for decode/pretrain with modular internals."""
 
     def __init__(self):
-        super().__init__("central_controller_ssvep_node3")
+        super().__init__("central_controller_ssvep_node3_1")
 
         desc = lambda text: ParameterDescriptor(description=text)
         self.config = make_default_config()
