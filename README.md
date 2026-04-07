@@ -99,10 +99,13 @@ ros2 run eeg_processing ssvep_communication_node3 --ros-args \
   -p run_mode:=decode \
   -p reasoner_mode_enabled:=true
 
-# 8. 启动EEG Bypass 版本节点 （Node3_1
+# 8. 启动EEG Bypass 版本节点 （Node3_1）
 ros2 run eeg_processing ssvep_communication_node3_1 --ros-args \
 -p eeg_bypass_debug:=true \
 -p reasoner_mode_enabled:=true
+
+# 8.1 启动reasoner 推理器节点
+ros2 run publisher_test reasoner_publish_test_2
 ```
 
 ### 3. 测试与工具工具

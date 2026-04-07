@@ -5,13 +5,12 @@ import json
 import os
 import re
 import textwrap
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import httpx
 import numpy as np
 import rclpy
-from openai import OpenAI
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.node import Node
 from sensor_msgs.msg import Image
@@ -28,12 +27,9 @@ except Exception:
 # Static code-level switches (non-ROS params by design).
 PREFERRED_CAMERA = "camera2"  # Switch to "camera1" if needed.
 
-# LLM compatibility config (fill with your own endpoint/credentials).
-OPENAI_BASE_URL = "https://api.siliconflow.cn/v1" # "https://cloud.infini-ai.com/maas/coding/v1"
-OPENAI_API_KEY = "sk-gzzgcanfgcdwxlnwfwrcmtjkwyvuqflwxnwspwxycxrksuyh" # "sk-cp-7udwseww3rks2yfx"
-OPENAI_MODEL = "Pro/moonshotai/Kimi-K2.5" # "kimi-k2.5"
-OPENAI_PROXY_URL = "socks5://127.0.0.1:7897"
-OPENAI_TIMEOUT_S = 60.0
+# Local Qwen2.5-VL model config
+QWEN_MODEL_PATH = "/home/frank/workspace/qwen25_vl"
+QWEN_MAX_NEW_TOKENS = 512
 
 MAX_BATCH_SIZE = 6
 ACTIVITY_CANDIDATE_COUNT = 12
@@ -133,7 +129,16 @@ class ReasonerPublishTest2Node(Node):
         self.handshake_complete = False
         self.handshake_sent = False
         self.finished = False
-        self._llm_client: Optional[OpenAI] = None
+
+        # Local Qwen model state (parallel loading)
+        self._qwen_model = None
+        self._qwen_processor = None
+        self._model_loading = False
+        self._model_loaded = False
+        self._model_lock = threading.Lock()
+
+        # Start model loading in background thread (non-blocking)
+        self._start_model_loading()
 
         self.get_logger().info(
             "Reasoner v2 ready: "
@@ -142,6 +147,55 @@ class ReasonerPublishTest2Node(Node):
             f"preferred_camera={PREFERRED_CAMERA}, "
             f"input_topic={self.input_topic}, output_topic={self.output_topic}"
         )
+        self.get_logger().info("Qwen model loading in background...")
+
+    def _start_model_loading(self):
+        """Start loading the Qwen model in a background thread."""
+        with self._model_lock:
+            if self._model_loading or self._model_loaded:
+                return
+            self._model_loading = True
+
+        def _load_model():
+            try:
+                import torch
+                from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
+
+                # Set environment to skip HuggingFace Hub verification
+                os.environ["HF_HUB_OFFLINE"] = "1"
+
+                self.get_logger().info(f"Loading Qwen2.5-VL model from {QWEN_MODEL_PATH}...")
+
+                model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                    QWEN_MODEL_PATH,
+                    torch_dtype=torch.float16,
+                    device_map="auto",
+                    local_files_only=True,
+                    trust_remote_code=True
+                )
+                model.eval()
+
+                processor = AutoProcessor.from_pretrained(
+                    QWEN_MODEL_PATH,
+                    local_files_only=True,
+                    trust_remote_code=True
+                )
+
+                with self._model_lock:
+                    self._qwen_model = model
+                    self._qwen_processor = processor
+                    self._model_loaded = True
+                    self._model_loading = False
+
+                self.get_logger().info("Qwen2.5-VL model loaded successfully")
+
+            except Exception as e:
+                self.get_logger().error(f"Failed to load Qwen model: {e}")
+                with self._model_lock:
+                    self._model_loading = False
+
+        thread = threading.Thread(target=_load_model, daemon=True)
+        thread.start()
 
     @staticmethod
     def _natural_sort_key(path: str):
@@ -638,49 +692,81 @@ class ReasonerPublishTest2Node(Node):
         if not object_labels:
             return self._fallback_activity_candidates()
 
-        if not OPENAI_BASE_URL.strip() or not OPENAI_API_KEY.strip() or not OPENAI_MODEL.strip():
-            self.get_logger().warning("LLM config missing, using fallback activity candidates")
-            return self._fallback_activity_candidates()
+        # Check if model is loaded
+        with self._model_lock:
+            if not self._model_loaded or self._qwen_model is None:
+                if self._model_loading:
+                    self.get_logger().warning("Qwen model still loading, using fallback")
+                else:
+                    self.get_logger().warning("Qwen model not available, using fallback")
+                return self._fallback_activity_candidates()
+            model = self._qwen_model
+            processor = self._qwen_processor
 
-        system_prompt = (
+        prompt_text = (
             "You are a planning assistant. Return ONLY a JSON array with exactly "
             f"{ACTIVITY_CANDIDATE_COUNT} entries sorted by descending plausibility. "
-            "Each entry must be an object with fields: activity (string), score (number)."
-        )
-        user_prompt = (
+            "Each entry must be an object with fields: activity (string), score (number).\n\n"
             f"Selected objects: {object_labels}\n"
             f"Semantic category: {category}\n"
             "Generate candidate user activities grounded in these objects/category."
         )
 
         try:
-            if self._llm_client is None:
-                http_client = httpx.Client(
-                    proxy=OPENAI_PROXY_URL,
-                    timeout=float(OPENAI_TIMEOUT_S),
-                )
-                self._llm_client = OpenAI(
-                    base_url=OPENAI_BASE_URL,
-                    api_key=OPENAI_API_KEY,
-                    http_client=http_client,
+            import torch
+            from qwen_vl_utils import process_vision_info
+
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt_text}
+                    ]
+                }
+            ]
+
+            text = processor.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+
+            image_inputs, video_inputs = process_vision_info(messages)
+
+            inputs = processor(
+                text=[text],
+                images=image_inputs,
+                videos=video_inputs,
+                padding=True,
+                return_tensors="pt",
+            ).to(model.device)
+
+            with torch.no_grad():
+                generated_ids = model.generate(
+                    **inputs,
+                    max_new_tokens=QWEN_MAX_NEW_TOKENS
                 )
 
-            response = self._llm_client.chat.completions.create(
-                model=OPENAI_MODEL,
-                temperature=0.2,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-            )
-            content = str(response.choices[0].message.content or "")
+            generated_ids_trimmed = [
+                out_ids[len(in_ids):]
+                for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+            ]
+
+            content = processor.batch_decode(
+                generated_ids_trimmed,
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=False
+            )[0]
+
+            self.get_logger().info(f"Qwen output: {content[:200]}...")
+
         except Exception as exc:
-            self.get_logger().warning(f"LLM request failed, fallback enabled: {exc}")
+            self.get_logger().warning(f"Qwen inference failed, fallback enabled: {exc}")
             return self._fallback_activity_candidates()
 
         raw_list = self._extract_json_array(content)
         if not raw_list:
-            self.get_logger().warning("LLM content does not contain valid JSON array, fallback")
+            self.get_logger().warning("Qwen content does not contain valid JSON array, fallback")
             return self._fallback_activity_candidates()
 
         normalized: List[Dict[str, object]] = []
@@ -703,7 +789,7 @@ class ReasonerPublishTest2Node(Node):
                 break
 
         if not normalized:
-            self.get_logger().warning("LLM output normalized to empty list, fallback")
+            self.get_logger().warning("Qwen output normalized to empty list, fallback")
             return self._fallback_activity_candidates()
 
         while len(normalized) < ACTIVITY_CANDIDATE_COUNT:

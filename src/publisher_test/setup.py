@@ -30,6 +30,7 @@ setup(
             "reasoner_publish_test = publisher_test.reasoner_publish_test:main",
             "reasoner_publish_test_1 = publisher_test.reasoner_publish_test_1:main",
             "reasoner_publish_test_2 = publisher_test.reasoner_publish_test_2:main",
+            "reasoner_publish_test_2_local_llm = publisher_test.reasoner_publish_test_2_local_llm:main",
         ],
     },
 )
