@@ -29,6 +29,7 @@ setup(
             "eeg_tcp_listener_node = publisher_test.eeg_tcp_listener_node:main",
             "reasoner_publish_test = publisher_test.reasoner_publish_test:main",
             "reasoner_publish_test_1 = publisher_test.reasoner_publish_test_1:main",
+            "reasoner_publish_test_2 = publisher_test.reasoner_publish_test_2:main",
         ],
     },
 )

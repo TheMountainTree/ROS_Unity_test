@@ -65,11 +65,16 @@ class ReasonerModule:
 
         batch = []
         for idx in range(expected):
+            item_meta = self.reasoner_building_meta[idx]
             batch.append(
                 {
                     "group": group_id,
                     "index": idx,
-                    "source_path": self.reasoner_building_meta[idx]["source_path"],
+                    "source_path": item_meta["source_path"],
+                    "stage": item_meta.get("stage", "object"),
+                    "page": item_meta.get("page", "0"),
+                    "item_uid": item_meta.get("item_uid", ""),
+                    "item_label": item_meta.get("item_label", ""),
                     "image": self.reasoner_building_images[idx],
                 }
             )
@@ -197,6 +202,10 @@ class ReasonerModule:
             "group": group_id,
             "index": image_index,
             "source_path": meta.get("image_path", ""),
+            "stage": meta.get("stage", "object"),
+            "page": meta.get("page", "0"),
+            "item_uid": meta.get("item_uid", ""),
+            "item_label": meta.get("item_label", ""),
         }
 
         if self._finalize_reasoner_group_if_ready(group_id):
@@ -266,7 +275,8 @@ class ReasonerModule:
         self.base_images = [item["image"] for item in batch]
         self.base_image_ids = list(range(1, len(batch) + 1))
         self.get_logger().info(
-            f"activate reasoner batch group={batch[0]['group']}, size={len(batch)}"
+            f"activate reasoner batch group={batch[0]['group']}, "
+            f"stage={batch[0].get('stage', 'object')}, size={len(batch)}"
         )
         return True
 
@@ -298,6 +308,11 @@ class ReasonerModule:
         self.state = NodeState.WAITING
         self.state_until = time.monotonic() + max(0.0, self.decode_iti)
 
+    def _current_reasoner_stage(self) -> str:
+        if not self.current_reasoner_group_images:
+            return "object"
+        return str(self.current_reasoner_group_images[0].get("stage", "object"))
+
     def _handle_reasoner_selection(self, selection: int) -> None:
         """Handle user selection in reasoner mode."""
         if selection not in range(8):
@@ -311,25 +326,30 @@ class ReasonerModule:
                     f"no current group image for selection slot={selection}"
                 )
                 return
+            stage = str(selected.get("stage", "object"))
             self.next_history_id += 1
-            history_item = {
+            history_item: Optional[Dict[str, object]] = {
                 "history_id": self.next_history_id,
                 "selection_slot": selection,
                 "image": selected["image"],
                 "source_path": selected.get("source_path", ""),
                 "group": selected.get("group", -1),
                 "index": selected.get("index", -1),
+                "stage": stage,
+                "page": selected.get("page", "0"),
+                "item_uid": selected.get("item_uid", ""),
+                "item_label": selected.get("item_label", ""),
             }
             self.history_stack.append(history_item)
             self._publish_history_image_msg(
                 history_item["image"], history_item["history_id"]
             )
-            self._publish_reasoner_selection(selection, history_item)
+            self._publish_reasoner_selection(selection, selected, history_item)
 
             self.current_reasoner_group_images = []
             self.state = NodeState.REASONER_WAIT_BATCH
             self.get_logger().info(
-                f"selection slot={selection} accepted, history_id={history_item['history_id']}, "
+                f"selection slot={selection} accepted, stage={stage}, "
                 f"history_size={len(self.history_stack)}, waiting next reasoner batch"
             )
             return
@@ -337,40 +357,65 @@ class ReasonerModule:
         if selection == 3:
             self._publish_reasoner_cmd("confirm")
             self.get_logger().info(
-                f"selection slot=3 (confirm), history_size={len(self.history_stack)}, "
-                "waiting for reasoner done"
+                f"selection slot=3 (confirm), stage={self._current_reasoner_stage()}, "
+                "waiting reasoner next batch"
             )
-            self.state = NodeState.WAITING
-            self.state_until = 0.0
+            self.current_reasoner_group_images = []
+            self.state = NodeState.REASONER_WAIT_BATCH
             return
 
         if selection == 7:
-            if not self.history_stack:
+            current_stage = self._current_reasoner_stage()
+            if current_stage == "object" and not self.history_stack:
                 self.get_logger().warning(
                     "selection slot=7 ignored because history is empty"
                 )
                 return
-            deleted_item = self.history_stack.pop()
-            self._send_history_udp_command({"cmd": "delete_last"})
+            deleted_item: Optional[Dict[str, object]] = None
+            if self.history_stack:
+                deleted_item = self.history_stack.pop()
+                self._send_history_udp_command({"cmd": "delete_last"})
             self._publish_reasoner_cmd("rollback")
 
             self.current_reasoner_group_images = []
             self.state = NodeState.REASONER_WAIT_BATCH
-            self.get_logger().info(
-                f"selection slot=7 (rollback), deleted history_id={deleted_item['history_id']}, "
-                f"history_size={len(self.history_stack)}, waiting reasoner to resend previous group"
-            )
+            if deleted_item is not None:
+                self.get_logger().info(
+                    f"selection slot=7 (rollback), stage={current_stage}, "
+                    f"deleted history_id={deleted_item['history_id']}, "
+                    f"history_size={len(self.history_stack)}, waiting reasoner previous batch"
+                )
+            else:
+                self.get_logger().info(
+                    f"selection slot=7 (rollback), stage={current_stage}, "
+                    "waiting reasoner previous batch"
+                )
 
-    def _publish_reasoner_selection(self, slot: int, history_item: Dict[str, object]) -> None:
+    def _publish_reasoner_selection(
+        self,
+        slot: int,
+        selected: Dict[str, object],
+        history_item: Optional[Dict[str, object]] = None,
+    ) -> None:
         """Publish selection result to reasoner."""
+        history_id = -1 if history_item is None else int(history_item.get("history_id", -1))
+        source_path = selected.get("source_path", "")
+        stage = selected.get("stage", "object")
+        page = selected.get("page", "0")
+        item_uid = selected.get("item_uid", "")
+        item_label = selected.get("item_label", "")
         msg = Image()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = (
             f"cmd=selection;slot={slot};"
-            f"history_id={history_item['history_id']};"
-            f"group={history_item.get('group', -1)};"
-            f"index={history_item.get('index', -1)};"
-            f"source_path={os.path.basename(str(history_item.get('source_path', '')))}"
+            f"history_id={history_id};"
+            f"group={selected.get('group', -1)};"
+            f"index={selected.get('index', -1)};"
+            f"source_path={os.path.basename(str(source_path))};"
+            f"stage={stage};"
+            f"page={page};"
+            f"item_uid={item_uid};"
+            f"item_label={item_label}"
         )
         msg.height = 1
         msg.width = 1

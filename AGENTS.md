@@ -21,6 +21,7 @@ This repository is a ROS2 workspace for Unity-integrated BCI workflows.
 - `src/eeg_processing/eeg_processing/ssvep_communication_node3_config.py`: static defaults for Node3 (general/unity/trigger/eeg/decode/pretrain/reasoner); keep runtime override surface minimal.
 - `src/publisher_test/`: utility/test publishers, UDP trigger sender, TCP listener.
 - `src/publisher_test/publisher_test/reasoner_publish_test_1.py`: v1 reasoner test publisher with fixed 4-group sizes (6/5/4/3) and explicit `batch_start`/`batch_end` envelope commands.
+- `src/publisher_test/publisher_test/reasoner_publish_test_2.py`: multi-stage (A/B/C) reasoner publisher that scans `picture/`, fuses camera1/camera2 object crops with camera-priority dedup, sends paged batches (`<=6`) for object/category/activity, renders text candidates into images, and supports OpenAI-compatible activity generation with local fallback.
 - `src/ROS-TCP-Endpoint/`: Unity ROS TCP bridge package (`ros_tcp_endpoint`).
 - `data/`: recorded trials, mappings, and generated datasets/plots.
 - `dev_logs/`: development notes.
@@ -50,6 +51,10 @@ Run from workspace root:
 - For Node3_1 maintenance, edit behavior in `decode_1.py` / `pretrain_1.py` / `reasoner_1.py`; keep only wiring in `SSVEP_Communication_Node3_1.py`.
 - Decode v1 batch protocol (Node3_1 -> Unity): publish `cmd=batch_start;trial=...;target=...;count=...` on `/ssvep_decode_cmd`, then image packets on `/image_seg`, then `cmd=batch_end;...`; Unity should flash only active dynamic slots implied by `count` (max 6).
 - Reasoner v1 test protocol (`reasoner_publish_test_1` -> Node3_1): each group is enclosed by `cmd=batch_start;group=...;count=...` and `cmd=batch_end;group=...;count=...` on `/reasoner/images`; image frames keep `group/index/image_path` metadata and can carry `count`/`end` for backward compatibility.
+- Reasoner v2 staged protocol (`reasoner_publish_test_2` -> Node3_1): image frame metadata extends with `stage/page/item_uid/item_label`; `cmd=confirm` means “next page or next stage” (not final confirmation), `cmd=rollback` means stage-aware back navigation, and only `cmd=done` closes the session.
+- Node3_1 reasoner history conventions: `reasoner_1.py` appends/publishes history images for all staged selections (`object/category/activity`), and rollback removes the latest history item when present.
+- `reasoner_publish_test_2` camera conflict policy is code-level (`PREFERRED_CAMERA`) rather than ROS parameters; default is `camera2` priority.
+- `reasoner_publish_test_2` LLM settings are code-level constants (`OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT_S`) and use OpenAI-compatible Chat Completions JSON; fallback activity candidates must remain available when LLM output is missing/invalid.
 - Console entry points should remain explicit and task-oriented (see each package `setup.py`).
 
 ## Testing Guidelines

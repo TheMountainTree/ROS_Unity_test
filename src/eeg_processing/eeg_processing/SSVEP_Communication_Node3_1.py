@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Modular SSVEP communication node (Node3)."""
+"""Modular SSVEP communication node (Node3_1 variant).
+
+Node3_1 keeps runtime wiring in this file and delegates reasoner batch semantics
+(including multi-stage object/category/activity flows) to ``reasoner_1.py``.
+"""
 
 import os
 import socket
@@ -67,6 +71,9 @@ class CentralControllerSSVEPNode3(DecodeModule, PretrainModule, ReasonerModule, 
             f"image_topic={self.image_topic}, decode_command_topic={self.decode_command_topic}, "
             f"command_topic={self.command_topic}, save_dir={self.save_dir}, "
             f"eeg_bypass_debug={self.eeg_bypass_debug}"
+        )
+        self.get_logger().info(
+            "Node3_1 reasoner protocol: stage-aware selection/confirm/rollback handled by reasoner_1.py"
         )
 
     def _param_str(self, name: str) -> str:
