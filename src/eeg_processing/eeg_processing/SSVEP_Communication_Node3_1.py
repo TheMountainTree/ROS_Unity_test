@@ -73,7 +73,8 @@ class CentralControllerSSVEPNode3(DecodeModule, PretrainModule, ReasonerModule, 
             f"eeg_bypass_debug={self.eeg_bypass_debug}"
         )
         self.get_logger().info(
-            "Node3_1 reasoner protocol: stage-aware selection/confirm/rollback handled by reasoner_1.py"
+            "Node3_1 reasoner protocol: stage-aware selection/confirm/rollback/reuse_page "
+            "handled by reasoner_1.py"
         )
 
     def _param_str(self, name: str) -> str:

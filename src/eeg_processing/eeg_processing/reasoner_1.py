@@ -113,6 +113,20 @@ class ReasonerModule:
             self._reset_reasoner_building_state()
             return
 
+        if cmd == "reuse_page":
+            if self.current_reasoner_group_images:
+                stage = self._current_reasoner_stage()
+                self.get_logger().info(
+                    f"reasoner reuse_page received, stage={stage}, "
+                    "restart prepare with current batch"
+                )
+                self._start_next_decode_trial_with_current_images()
+            else:
+                self.get_logger().warning(
+                    "reasoner reuse_page received but no current batch to reuse"
+                )
+            return
+
         if cmd in ("batch_start", "batch_end"):
             try:
                 group_id = int(meta.get("group", "-1"))
@@ -313,6 +327,15 @@ class ReasonerModule:
             return "object"
         return str(self.current_reasoner_group_images[0].get("stage", "object"))
 
+    @staticmethod
+    def _is_same_stage_item(a: Optional[Dict[str, object]], b: Optional[Dict[str, object]]) -> bool:
+        if a is None or b is None:
+            return False
+        return (
+            str(a.get("stage", "")) == str(b.get("stage", ""))
+            and str(a.get("item_uid", "")) == str(b.get("item_uid", ""))
+        )
+
     def _handle_reasoner_selection(self, selection: int) -> None:
         """Handle user selection in reasoner mode."""
         if selection not in range(8):
@@ -327,6 +350,14 @@ class ReasonerModule:
                 )
                 return
             stage = str(selected.get("stage", "object"))
+            last_history = self.history_stack[-1] if self.history_stack else None
+            if self._is_same_stage_item(selected, last_history):
+                self.get_logger().info(
+                    f"duplicate selection skipped: stage={stage}, "
+                    f"item_uid={selected.get('item_uid', '')}; restart prepare with current batch"
+                )
+                self._start_next_decode_trial_with_current_images()
+                return
             self.next_history_id += 1
             history_item: Optional[Dict[str, object]] = {
                 "history_id": self.next_history_id,
@@ -346,11 +377,12 @@ class ReasonerModule:
             )
             self._publish_reasoner_selection(selection, selected, history_item)
 
-            self.current_reasoner_group_images = []
+            if stage != "object":
+                self.current_reasoner_group_images = []
             self.state = NodeState.REASONER_WAIT_BATCH
             self.get_logger().info(
                 f"selection slot={selection} accepted, stage={stage}, "
-                f"history_size={len(self.history_stack)}, waiting next reasoner batch"
+                f"history_size={len(self.history_stack)}, waiting reasoner response"
             )
             return
 
@@ -360,7 +392,6 @@ class ReasonerModule:
                 f"selection slot=3 (confirm), stage={self._current_reasoner_stage()}, "
                 "waiting reasoner next batch"
             )
-            self.current_reasoner_group_images = []
             self.state = NodeState.REASONER_WAIT_BATCH
             return
 

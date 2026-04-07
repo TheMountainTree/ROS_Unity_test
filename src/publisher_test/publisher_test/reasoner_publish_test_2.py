@@ -509,7 +509,13 @@ class ReasonerPublishTest2Node(Node):
                 f"StateA select: uid={selected_item['uid']}, label={selected_item['label']}, "
                 f"selected_total={len(self.selected_objects)}"
             )
-            self._publish_current_page()
+            self._publish_cmd(
+                "reuse_page",
+                stage=self.stage,
+                page=self.current_page,
+                group=self.current_group_id,
+                count=len(self.current_page_items),
+            )
             return
 
         if self.stage == STAGE_CATEGORY:
@@ -561,6 +567,20 @@ class ReasonerPublishTest2Node(Node):
                 f"State {self.stage} confirm: next page {self.current_page + 1}/{len(pages)}"
             )
             self._publish_current_page()
+            return
+
+        if self.stage in (STAGE_CATEGORY, STAGE_ACTIVITY):
+            self.get_logger().info(
+                f"State {self.stage} confirm on last page: reuse current page "
+                f"{self.current_page + 1} without re-publishing images"
+            )
+            self._publish_cmd(
+                "reuse_page",
+                stage=self.stage,
+                page=self.current_page,
+                group=self.current_group_id,
+                count=len(self.current_page_items),
+            )
             return
 
         self.get_logger().info(
