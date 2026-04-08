@@ -704,11 +704,10 @@ class ReasonerPublishTest2Node(Node):
             return
 
         self.current_page = max(0, min(target_page, len(pages) - 1))
-        cleared_count = self._clear_target_page_selections(self.stage, self.current_page)
         self.get_logger().info(
             "rollback(confirm undo) to previous page: "
             f"stage={self.stage}, page={self.current_page + 1}/{len(pages)}, "
-            f"cleared_selection_count={cleared_count}"
+            "selection_state_preserved=true"
         )
         self._publish_current_page()
 
@@ -991,9 +990,9 @@ class ReasonerPublishTest2Node(Node):
         objects_text = "、".join(object_uids) if object_uids else "（无）"
         self.get_logger().info(f"Selected category: {category}")
         self.get_logger().info(f"Selected activity: {activity}")
-        self.get_logger().info(
-            f"最终用户选择了物体：{objects_text}；最终活动：{activity or '（无）'}"
-        )
+        final_text = f"最终用户选择了物体：{objects_text}；最终活动：{activity or '（无）'}"
+        self.get_logger().info(final_text)
+        self._publish_llm_stream_event("append", text=f"\n{final_text}\n")
         self.get_logger().info("=" * 60)
 
 
