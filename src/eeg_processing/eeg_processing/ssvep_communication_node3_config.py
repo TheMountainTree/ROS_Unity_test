@@ -78,6 +78,8 @@ class ReasonerConfig:
     enabled: bool = False
     input_topic: str = "/reasoner/images"
     output_topic: str = "/reasoner/feedback"
+    llm_stream_input_topic: str = "/reasoner/llm_stream"
+    llm_stream_output_topic: str = "/llm_output_stream"
     mock_selected_index: int = -1
     history_image_topic: str = "/history_image"
     history_image_width: int = 140

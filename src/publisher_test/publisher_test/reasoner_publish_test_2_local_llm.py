@@ -14,6 +14,7 @@ import rclpy
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.node import Node
 from sensor_msgs.msg import Image
+from std_msgs.msg import String as StringMsg
 
 try:
     from PIL import Image as PILImage
@@ -88,6 +89,7 @@ class ReasonerPublishTest2Node(Node):
             raise RuntimeError("PIL/Pillow is required for reasoner_publish_test_2")
 
         self.publisher_ = self.create_publisher(Image, self.input_topic, 10)
+        self.llm_stream_pub = self.create_publisher(StringMsg, "/reasoner/llm_stream", 10)
         self.feedback_sub_ = self.create_subscription(
             Image, self.output_topic, self.feedback_callback, 10
         )
@@ -422,6 +424,26 @@ class ReasonerPublishTest2Node(Node):
         msg.data = bytes([0, 0, 0])
         self.publisher_.publish(msg)
 
+    def _publish_llm_stream_event(
+        self,
+        event_type: str,
+        text: str = "",
+        stage: str = STAGE_ACTIVITY,
+    ) -> None:
+        payload = {"type": event_type, "stage": stage}
+        if text:
+            payload["text"] = text
+        msg = StringMsg()
+        msg.data = json.dumps(payload, ensure_ascii=False)
+        self.llm_stream_pub.publish(msg)
+
+    def _publish_pseudo_stream_text(self, text: str, chunk_size: int = 24) -> None:
+        clean = str(text or "").strip()
+        if not clean:
+            return
+        for i in range(0, len(clean), max(1, chunk_size)):
+            self._publish_llm_stream_event("append", text=clean[i : i + chunk_size])
+
     def _current_pages(self) -> List[List[Dict[str, object]]]:
         if self.stage == STAGE_OBJECT:
             return self.object_pages
@@ -689,121 +711,150 @@ class ReasonerPublishTest2Node(Node):
         if self.selected_category is not None:
             category = str(self.selected_category.get("label", ""))
 
-        if not object_labels:
-            return self._fallback_activity_candidates()
-
-        # Check if model is loaded
-        with self._model_lock:
-            if not self._model_loaded or self._qwen_model is None:
-                if self._model_loading:
-                    self.get_logger().warning("Qwen model still loading, using fallback")
-                else:
-                    self.get_logger().warning("Qwen model not available, using fallback")
-                return self._fallback_activity_candidates()
-            model = self._qwen_model
-            processor = self._qwen_processor
-
-        prompt_text = (
-            "You are a planning assistant. Return ONLY a JSON array with exactly "
-            f"{ACTIVITY_CANDIDATE_COUNT} entries sorted by descending plausibility. "
-            "Each entry must be an object with fields: activity (string), score (number).\n\n"
-            f"Selected objects: {object_labels}\n"
-            f"Semantic category: {category}\n"
-            "Generate candidate user activities grounded in these objects/category."
+        self._publish_llm_stream_event(
+            "reset",
+            text="Generating activity candidates...\n",
         )
-
         try:
-            import torch
-            from qwen_vl_utils import process_vision_info
+            if not object_labels:
+                self._publish_llm_stream_event(
+                    "error",
+                    text="No selected objects, fallback activity candidates used.\n",
+                )
+                return self._fallback_activity_candidates()
 
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt_text}
-                    ]
-                }
-            ]
+            # Check if model is loaded
+            with self._model_lock:
+                if not self._model_loaded or self._qwen_model is None:
+                    if self._model_loading:
+                        self.get_logger().warning("Qwen model still loading, using fallback")
+                        self._publish_llm_stream_event(
+                            "error",
+                            text="Qwen model is still loading. Fallback activity candidates used.\n",
+                        )
+                    else:
+                        self.get_logger().warning("Qwen model not available, using fallback")
+                        self._publish_llm_stream_event(
+                            "error",
+                            text="Qwen model not available. Fallback activity candidates used.\n",
+                        )
+                    return self._fallback_activity_candidates()
+                model = self._qwen_model
+                processor = self._qwen_processor
 
-            text = processor.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True
+            prompt_text = (
+                "You are a planning assistant. Return ONLY a JSON array with exactly "
+                f"{ACTIVITY_CANDIDATE_COUNT} entries sorted by descending plausibility. "
+                "Each entry must be an object with fields: activity (string), score (number).\n\n"
+                f"Selected objects: {object_labels}\n"
+                f"Semantic category: {category}\n"
+                "Generate candidate user activities grounded in these objects/category."
             )
 
-            image_inputs, video_inputs = process_vision_info(messages)
+            try:
+                import torch
+                from qwen_vl_utils import process_vision_info
 
-            inputs = processor(
-                text=[text],
-                images=image_inputs,
-                videos=video_inputs,
-                padding=True,
-                return_tensors="pt",
-            ).to(model.device)
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": prompt_text}],
+                    }
+                ]
 
-            with torch.no_grad():
-                generated_ids = model.generate(
-                    **inputs,
-                    max_new_tokens=QWEN_MAX_NEW_TOKENS
+                text = processor.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
                 )
 
-            generated_ids_trimmed = [
-                out_ids[len(in_ids):]
-                for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
-            ]
+                image_inputs, video_inputs = process_vision_info(messages)
 
-            content = processor.batch_decode(
-                generated_ids_trimmed,
-                skip_special_tokens=True,
-                clean_up_tokenization_spaces=False
-            )[0]
+                inputs = processor(
+                    text=[text],
+                    images=image_inputs,
+                    videos=video_inputs,
+                    padding=True,
+                    return_tensors="pt",
+                ).to(model.device)
 
-            self.get_logger().info(f"Qwen output: {content[:200]}...")
+                with torch.no_grad():
+                    generated_ids = model.generate(
+                        **inputs,
+                        max_new_tokens=QWEN_MAX_NEW_TOKENS,
+                    )
 
-        except Exception as exc:
-            self.get_logger().warning(f"Qwen inference failed, fallback enabled: {exc}")
-            return self._fallback_activity_candidates()
+                generated_ids_trimmed = [
+                    out_ids[len(in_ids) :]
+                    for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+                ]
 
-        raw_list = self._extract_json_array(content)
-        if not raw_list:
-            self.get_logger().warning("Qwen content does not contain valid JSON array, fallback")
-            return self._fallback_activity_candidates()
+                content = processor.batch_decode(
+                    generated_ids_trimmed,
+                    skip_special_tokens=True,
+                    clean_up_tokenization_spaces=False,
+                )[0]
+                self._publish_pseudo_stream_text(content, chunk_size=24)
+                self.get_logger().info(f"Qwen output: {content[:200]}...")
 
-        normalized: List[Dict[str, object]] = []
-        seen_labels = set()
-        for item in raw_list:
-            if isinstance(item, dict):
-                label = str(item.get("activity", "")).strip()
-                score = item.get("score", "")
-            else:
-                label = str(item).strip()
-                score = ""
-            if not label:
-                continue
-            lowered = label.lower()
-            if lowered in seen_labels:
-                continue
-            seen_labels.add(lowered)
-            normalized.append({"activity": label, "score": score})
-            if len(normalized) >= ACTIVITY_CANDIDATE_COUNT:
-                break
+            except Exception as exc:
+                self.get_logger().warning(f"Qwen inference failed, fallback enabled: {exc}")
+                self._publish_llm_stream_event(
+                    "error",
+                    text=f"Qwen inference failed: {exc}\nFallback activity candidates used.\n",
+                )
+                return self._fallback_activity_candidates()
 
-        if not normalized:
-            self.get_logger().warning("Qwen output normalized to empty list, fallback")
-            return self._fallback_activity_candidates()
+            raw_list = self._extract_json_array(content)
+            if not raw_list:
+                self.get_logger().warning("Qwen content does not contain valid JSON array, fallback")
+                self._publish_llm_stream_event(
+                    "error",
+                    text="Qwen output is not a valid JSON array. Fallback candidates used.\n",
+                )
+                return self._fallback_activity_candidates()
 
-        while len(normalized) < ACTIVITY_CANDIDATE_COUNT:
-            fallback_tail = self._fallback_activity_candidates()
-            for fallback_item in fallback_tail:
-                label = str(fallback_item.get("activity", "")).strip()
-                if not label or label.lower() in seen_labels:
+            normalized: List[Dict[str, object]] = []
+            seen_labels = set()
+            for item in raw_list:
+                if isinstance(item, dict):
+                    label = str(item.get("activity", "")).strip()
+                    score = item.get("score", "")
+                else:
+                    label = str(item).strip()
+                    score = ""
+                if not label:
                     continue
-                seen_labels.add(label.lower())
-                normalized.append(fallback_item)
+                lowered = label.lower()
+                if lowered in seen_labels:
+                    continue
+                seen_labels.add(lowered)
+                normalized.append({"activity": label, "score": score})
                 if len(normalized) >= ACTIVITY_CANDIDATE_COUNT:
                     break
 
-        return normalized[:ACTIVITY_CANDIDATE_COUNT]
+            if not normalized:
+                self.get_logger().warning("Qwen output normalized to empty list, fallback")
+                self._publish_llm_stream_event(
+                    "error",
+                    text="Qwen candidates normalized to empty list. Fallback candidates used.\n",
+                )
+                return self._fallback_activity_candidates()
+
+            while len(normalized) < ACTIVITY_CANDIDATE_COUNT:
+                fallback_tail = self._fallback_activity_candidates()
+                for fallback_item in fallback_tail:
+                    label = str(fallback_item.get("activity", "")).strip()
+                    if not label or label.lower() in seen_labels:
+                        continue
+                    seen_labels.add(label.lower())
+                    normalized.append(fallback_item)
+                    if len(normalized) >= ACTIVITY_CANDIDATE_COUNT:
+                        break
+
+            return normalized[:ACTIVITY_CANDIDATE_COUNT]
+        finally:
+            self._publish_llm_stream_event("done")
 
     def _fallback_activity_candidates(self) -> List[Dict[str, object]]:
         object_labels = [str(obj.get("label", "")).strip() for obj in self.selected_objects]

@@ -15,6 +15,7 @@ from openai import OpenAI
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.node import Node
 from sensor_msgs.msg import Image
+from std_msgs.msg import String as StringMsg
 
 try:
     from PIL import Image as PILImage
@@ -92,6 +93,7 @@ class ReasonerPublishTest2Node(Node):
             raise RuntimeError("PIL/Pillow is required for reasoner_publish_test_2")
 
         self.publisher_ = self.create_publisher(Image, self.input_topic, 10)
+        self.llm_stream_pub = self.create_publisher(StringMsg, "/reasoner/llm_stream", 10)
         self.feedback_sub_ = self.create_subscription(
             Image, self.output_topic, self.feedback_callback, 10
         )
@@ -367,6 +369,38 @@ class ReasonerPublishTest2Node(Node):
         msg.step = 3
         msg.data = bytes([0, 0, 0])
         self.publisher_.publish(msg)
+
+    def _publish_llm_stream_event(
+        self,
+        event_type: str,
+        text: str = "",
+        stage: str = STAGE_ACTIVITY,
+    ) -> None:
+        payload = {"type": event_type, "stage": stage}
+        if text:
+            payload["text"] = text
+        msg = StringMsg()
+        msg.data = json.dumps(payload, ensure_ascii=False)
+        self.llm_stream_pub.publish(msg)
+
+    @staticmethod
+    def _extract_stream_delta_text(delta_content: object) -> str:
+        if delta_content is None:
+            return ""
+        if isinstance(delta_content, str):
+            return delta_content
+        if isinstance(delta_content, list):
+            parts: List[str] = []
+            for item in delta_content:
+                if isinstance(item, str):
+                    parts.append(item)
+                    continue
+                if isinstance(item, dict):
+                    text = item.get("text", "")
+                    if isinstance(text, str):
+                        parts.append(text)
+            return "".join(parts)
+        return str(delta_content)
 
     def _current_pages(self) -> List[List[Dict[str, object]]]:
         if self.stage == STAGE_OBJECT:
@@ -655,89 +689,134 @@ class ReasonerPublishTest2Node(Node):
         if self.selected_category is not None:
             category = str(self.selected_category.get("label", ""))
 
-        if not object_labels:
-            return self._fallback_activity_candidates()
-
-        if not OPENAI_BASE_URL.strip() or not OPENAI_API_KEY.strip() or not OPENAI_MODEL.strip():
-            self.get_logger().warning("LLM config missing, using fallback activity candidates")
-            return self._fallback_activity_candidates()
-
-        system_prompt = (
-            "You are a planning assistant. Return ONLY a JSON array with exactly "
-            f"{ACTIVITY_CANDIDATE_COUNT} entries sorted by descending plausibility. "
-            "Each entry must be an object with fields: activity (string), score (number)."
+        self._publish_llm_stream_event(
+            "reset",
+            text="Generating activity candidates...\n",
         )
-        user_prompt = (
-            f"Selected objects: {object_labels}\n"
-            f"Semantic category: {category}\n"
-            "Generate candidate user activities grounded in these objects/category."
-        )
-
         try:
-            if self._llm_client is None:
-                http_client = httpx.Client(
-                    proxy=OPENAI_PROXY_URL,
-                    timeout=float(OPENAI_TIMEOUT_S),
+            if not object_labels:
+                self._publish_llm_stream_event(
+                    "error",
+                    text="No selected objects, fallback activity candidates used.\n",
                 )
-                self._llm_client = OpenAI(
-                    base_url=OPENAI_BASE_URL,
-                    api_key=OPENAI_API_KEY,
-                    http_client=http_client,
-                )
+                return self._fallback_activity_candidates()
 
-            response = self._llm_client.chat.completions.create(
-                model=OPENAI_MODEL,
-                temperature=0.2,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+            if (
+                not OPENAI_BASE_URL.strip()
+                or not OPENAI_API_KEY.strip()
+                or not OPENAI_MODEL.strip()
+            ):
+                self.get_logger().warning("LLM config missing, using fallback activity candidates")
+                self._publish_llm_stream_event(
+                    "error",
+                    text="LLM config missing, fallback activity candidates used.\n",
+                )
+                return self._fallback_activity_candidates()
+
+            system_prompt = (
+                "You are a planning assistant. Return ONLY a JSON array with exactly "
+                f"{ACTIVITY_CANDIDATE_COUNT} entries sorted by descending plausibility. "
+                "Each entry must be an object with fields: activity (string), score (number)."
             )
-            content = str(response.choices[0].message.content or "")
-        except Exception as exc:
-            self.get_logger().warning(f"LLM request failed, fallback enabled: {exc}")
-            return self._fallback_activity_candidates()
+            user_prompt = (
+                f"Selected objects: {object_labels}\n"
+                f"Semantic category: {category}\n"
+                "Generate candidate user activities grounded in these objects/category."
+            )
 
-        raw_list = self._extract_json_array(content)
-        if not raw_list:
-            self.get_logger().warning("LLM content does not contain valid JSON array, fallback")
-            return self._fallback_activity_candidates()
+            try:
+                if self._llm_client is None:
+                    http_client = httpx.Client(
+                        proxy=OPENAI_PROXY_URL,
+                        timeout=float(OPENAI_TIMEOUT_S),
+                    )
+                    self._llm_client = OpenAI(
+                        base_url=OPENAI_BASE_URL,
+                        api_key=OPENAI_API_KEY,
+                        http_client=http_client,
+                    )
 
-        normalized: List[Dict[str, object]] = []
-        seen_labels = set()
-        for item in raw_list:
-            if isinstance(item, dict):
-                label = str(item.get("activity", "")).strip()
-                score = item.get("score", "")
-            else:
-                label = str(item).strip()
-                score = ""
-            if not label:
-                continue
-            lowered = label.lower()
-            if lowered in seen_labels:
-                continue
-            seen_labels.add(lowered)
-            normalized.append({"activity": label, "score": score})
-            if len(normalized) >= ACTIVITY_CANDIDATE_COUNT:
-                break
+                stream = self._llm_client.chat.completions.create(
+                    model=OPENAI_MODEL,
+                    temperature=0.2,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    stream=True,
+                )
+                parts: List[str] = []
+                for chunk in stream:
+                    choices = getattr(chunk, "choices", None)
+                    if not choices:
+                        continue
+                    delta = getattr(choices[0], "delta", None)
+                    if delta is None:
+                        continue
+                    token = self._extract_stream_delta_text(getattr(delta, "content", ""))
+                    if not token:
+                        continue
+                    parts.append(token)
+                    self._publish_llm_stream_event("append", text=token)
+                content = "".join(parts)
+            except Exception as exc:
+                self.get_logger().warning(f"LLM request failed, fallback enabled: {exc}")
+                self._publish_llm_stream_event(
+                    "error",
+                    text=f"LLM request failed: {exc}\nFallback activity candidates used.\n",
+                )
+                return self._fallback_activity_candidates()
 
-        if not normalized:
-            self.get_logger().warning("LLM output normalized to empty list, fallback")
-            return self._fallback_activity_candidates()
+            raw_list = self._extract_json_array(content)
+            if not raw_list:
+                self.get_logger().warning("LLM content does not contain valid JSON array, fallback")
+                self._publish_llm_stream_event(
+                    "error",
+                    text="LLM output is not a valid JSON array. Fallback candidates used.\n",
+                )
+                return self._fallback_activity_candidates()
 
-        while len(normalized) < ACTIVITY_CANDIDATE_COUNT:
-            fallback_tail = self._fallback_activity_candidates()
-            for fallback_item in fallback_tail:
-                label = str(fallback_item.get("activity", "")).strip()
-                if not label or label.lower() in seen_labels:
+            normalized: List[Dict[str, object]] = []
+            seen_labels = set()
+            for item in raw_list:
+                if isinstance(item, dict):
+                    label = str(item.get("activity", "")).strip()
+                    score = item.get("score", "")
+                else:
+                    label = str(item).strip()
+                    score = ""
+                if not label:
                     continue
-                seen_labels.add(label.lower())
-                normalized.append(fallback_item)
+                lowered = label.lower()
+                if lowered in seen_labels:
+                    continue
+                seen_labels.add(lowered)
+                normalized.append({"activity": label, "score": score})
                 if len(normalized) >= ACTIVITY_CANDIDATE_COUNT:
                     break
 
-        return normalized[:ACTIVITY_CANDIDATE_COUNT]
+            if not normalized:
+                self.get_logger().warning("LLM output normalized to empty list, fallback")
+                self._publish_llm_stream_event(
+                    "error",
+                    text="LLM candidates normalized to empty list. Fallback candidates used.\n",
+                )
+                return self._fallback_activity_candidates()
+
+            while len(normalized) < ACTIVITY_CANDIDATE_COUNT:
+                fallback_tail = self._fallback_activity_candidates()
+                for fallback_item in fallback_tail:
+                    label = str(fallback_item.get("activity", "")).strip()
+                    if not label or label.lower() in seen_labels:
+                        continue
+                    seen_labels.add(label.lower())
+                    normalized.append(fallback_item)
+                    if len(normalized) >= ACTIVITY_CANDIDATE_COUNT:
+                        break
+
+            return normalized[:ACTIVITY_CANDIDATE_COUNT]
+        finally:
+            self._publish_llm_stream_event("done")
 
     def _fallback_activity_candidates(self) -> List[Dict[str, object]]:
         object_labels = [str(obj.get("label", "")).strip() for obj in self.selected_objects]

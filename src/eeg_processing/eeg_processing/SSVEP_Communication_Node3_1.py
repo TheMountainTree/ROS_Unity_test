@@ -15,6 +15,7 @@ from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import Image
+from std_msgs.msg import String as StringMsg
 
 from .decode_1 import DecodeModule
 from .pretrain_1 import PretrainModule
@@ -53,6 +54,12 @@ class CentralControllerSSVEPNode3(DecodeModule, PretrainModule, ReasonerModule, 
         self.reasoner_sub = self.create_subscription(
             Image, self.reasoner_input_topic, self._on_reasoner_image, qos
         )
+        self.llm_stream_pub = self.create_publisher(
+            StringMsg, self.llm_stream_output_topic, qos
+        )
+        self.llm_stream_sub = self.create_subscription(
+            StringMsg, self.llm_stream_input_topic, self._on_reasoner_llm_stream, qos
+        )
 
         self.state = NodeState.INIT_WAIT
         self.state_until = time.monotonic() + self.startup_delay
@@ -75,6 +82,10 @@ class CentralControllerSSVEPNode3(DecodeModule, PretrainModule, ReasonerModule, 
         self.get_logger().info(
             "Node3_1 reasoner protocol: stage-aware selection/confirm/rollback/reuse_page "
             "handled by reasoner_1.py"
+        )
+        self.get_logger().info(
+            "Node3_1 llm stream forward: "
+            f"input={self.llm_stream_input_topic}, output={self.llm_stream_output_topic}"
         )
 
     def _param_str(self, name: str) -> str:
@@ -174,6 +185,8 @@ class CentralControllerSSVEPNode3(DecodeModule, PretrainModule, ReasonerModule, 
 
         self.reasoner_input_topic = self.reasoner_config.input_topic
         self.reasoner_output_topic = self.reasoner_config.output_topic
+        self.llm_stream_input_topic = self.reasoner_config.llm_stream_input_topic
+        self.llm_stream_output_topic = self.reasoner_config.llm_stream_output_topic
         self.history_image_topic = self.reasoner_config.history_image_topic
         self.history_image_width = self.reasoner_config.history_image_width
         self.history_image_height = self.reasoner_config.history_image_height
@@ -195,6 +208,17 @@ class CentralControllerSSVEPNode3(DecodeModule, PretrainModule, ReasonerModule, 
         self.eeg_n_channels = cfg.eeg_server.n_channels
         self.eeg_frame_floats = cfg.eeg_server.frame_floats
         self.eeg_fs = cfg.eeg_server.fs
+
+    def _on_reasoner_llm_stream(self, msg: StringMsg) -> None:
+        payload = str(msg.data or "")
+        if not payload.strip():
+            return
+        try:
+            forward = StringMsg()
+            forward.data = payload
+            self.llm_stream_pub.publish(forward)
+        except Exception as exc:
+            self.get_logger().warning(f"llm stream forward failed: {exc}")
 
     def _init_trigger_sender(self) -> None:
         if getattr(self, "eeg_bypass_debug", False):

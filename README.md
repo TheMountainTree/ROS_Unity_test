@@ -140,7 +140,7 @@ ros2 run eeg_processing history_sender_node
 
 示例：
 ```bash
-ros2 param set /central_controller_ssvep_node3 mock_selected_index 0
+ros2 param set /central_controller_ssvep_node3_1 mock_selected_index 0
 ```
 
 ### 5. Node2 配置说明
