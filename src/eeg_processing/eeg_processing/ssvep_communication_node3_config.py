@@ -80,8 +80,8 @@ class ReasonerConfig:
     output_topic: str = "/reasoner/feedback"
     mock_selected_index: int = -1
     history_image_topic: str = "/history_image"
-    history_image_width: int = 120
-    history_image_height: int = 120
+    history_image_width: int = 140
+    history_image_height: int = 140
     history_udp_ip: str = "127.0.0.1"
     history_udp_port: int = 12001
 
