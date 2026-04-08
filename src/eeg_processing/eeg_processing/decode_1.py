@@ -49,6 +49,7 @@ class DecodeModule:
         self.decode_dynamic_target_ids = base_dynamic_slots[: self.decode_num_images]
         self.current_decode_num_images = self.decode_num_images
         self.history_stack: List[Dict[str, object]] = []
+        self.reasoner_action_stack: List[Dict[str, object]] = []
         self.next_history_id = 0
         self.current_reasoner_group_images: List[Dict[str, object]] = []
         self.ready_reasoner_batches: List[List[Dict[str, object]]] = []

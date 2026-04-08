@@ -136,7 +136,7 @@ ros2 run eeg_processing history_sender_node
 - 选择参数：
   - `mock_selected_index=0/1/2/4/5/6`：将当前屏幕对应槽位图片推入 history，并请求下一组
   - `mock_selected_index=3`：把所有 history 图片回传给 reasoner，当前 6 张保持不变
-  - `mock_selected_index=7`：删除最后一张 history，并回到上一组 6 张重新选择
+  - `mock_selected_index=7`：删除上一步操作（若上一步是 `3(confirm)` 则执行 `rollback`；若上一步是选项选择则取消该选择并回到对应页面）
 
 示例：
 ```bash

@@ -322,6 +322,13 @@ class ReasonerModule:
         self.state = NodeState.WAITING
         self.state_until = time.monotonic() + max(0.0, self.decode_iti)
 
+    def _pop_history_item_by_id(self, history_id: int) -> Optional[Dict[str, object]]:
+        for idx in range(len(self.history_stack) - 1, -1, -1):
+            item = self.history_stack[idx]
+            if int(item.get("history_id", -1)) == int(history_id):
+                return self.history_stack.pop(idx)
+        return None
+
     def _current_reasoner_stage(self) -> str:
         if not self.current_reasoner_group_images:
             return "object"
@@ -372,6 +379,17 @@ class ReasonerModule:
                 "item_label": selected.get("item_label", ""),
             }
             self.history_stack.append(history_item)
+            self.reasoner_action_stack.append(
+                {
+                    "type": "selection",
+                    "history_id": history_item["history_id"],
+                    "stage": stage,
+                    "page": selected.get("page", "0"),
+                    "item_uid": selected.get("item_uid", ""),
+                    "item_label": selected.get("item_label", ""),
+                    "slot": selection,
+                }
+            )
             self._publish_history_image_msg(
                 history_item["image"], history_item["history_id"]
             )
@@ -387,6 +405,17 @@ class ReasonerModule:
             return
 
         if selection == 3:
+            self.reasoner_action_stack.append(
+                {
+                    "type": "confirm",
+                    "stage": self._current_reasoner_stage(),
+                    "page": (
+                        self.current_reasoner_group_images[0].get("page", "0")
+                        if self.current_reasoner_group_images
+                        else "0"
+                    ),
+                }
+            )
             self._publish_reasoner_cmd("confirm")
             self.get_logger().info(
                 f"selection slot=3 (confirm), stage={self._current_reasoner_stage()}, "
@@ -396,31 +425,55 @@ class ReasonerModule:
             return
 
         if selection == 7:
-            current_stage = self._current_reasoner_stage()
-            if current_stage == "object" and not self.history_stack:
+            if not self.reasoner_action_stack:
                 self.get_logger().warning(
-                    "selection slot=7 ignored because history is empty"
+                    "selection slot=7 ignored because action stack is empty"
                 )
                 return
-            deleted_item: Optional[Dict[str, object]] = None
-            if self.history_stack:
-                deleted_item = self.history_stack.pop()
+
+            current_stage = self._current_reasoner_stage()
+            last_action = self.reasoner_action_stack.pop()
+            action_type = str(last_action.get("type", "")).strip().lower()
+
+            if action_type == "confirm":
+                self._publish_reasoner_cmd("rollback")
+                self.current_reasoner_group_images = []
+                self.state = NodeState.REASONER_WAIT_BATCH
+                self.get_logger().info(
+                    f"selection slot=7 (undo confirm -> rollback), stage={current_stage}, "
+                    "waiting reasoner previous batch"
+                )
+                return
+
+            if action_type != "selection":
+                self.get_logger().warning(
+                    f"selection slot=7 ignored because unsupported action type='{action_type}'"
+                )
+                return
+
+            history_id = int(last_action.get("history_id", -1))
+            removed_item = self._pop_history_item_by_id(history_id)
+            if removed_item is None and self.history_stack:
+                removed_item = self.history_stack.pop()
+
+            if removed_item is not None:
                 self._send_history_udp_command({"cmd": "delete_last"})
-            self._publish_reasoner_cmd("rollback")
+            self._publish_reasoner_undo_selection(last_action)
 
             self.current_reasoner_group_images = []
             self.state = NodeState.REASONER_WAIT_BATCH
-            if deleted_item is not None:
+            if removed_item is not None:
                 self.get_logger().info(
-                    f"selection slot=7 (rollback), stage={current_stage}, "
-                    f"deleted history_id={deleted_item['history_id']}, "
+                    f"selection slot=7 (undo selection), stage={current_stage}, "
+                    f"deleted history_id={removed_item['history_id']}, "
                     f"history_size={len(self.history_stack)}, waiting reasoner previous batch"
                 )
             else:
                 self.get_logger().info(
-                    f"selection slot=7 (rollback), stage={current_stage}, "
-                    "waiting reasoner previous batch"
+                    f"selection slot=7 (undo selection), stage={current_stage}, "
+                    "history item missing, waiting reasoner previous batch"
                 )
+            return
 
     def _publish_reasoner_selection(
         self,
@@ -447,6 +500,25 @@ class ReasonerModule:
             f"page={page};"
             f"item_uid={item_uid};"
             f"item_label={item_label}"
+        )
+        msg.height = 1
+        msg.width = 1
+        msg.encoding = "bgr8"
+        msg.step = 3
+        msg.data = bytes([0, 0, 0])
+        self.reasoner_pub.publish(msg)
+
+    def _publish_reasoner_undo_selection(self, action: Dict[str, object]) -> None:
+        msg = Image()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = (
+            "cmd=undo_selection;"
+            f"slot={int(action.get('slot', -1))};"
+            f"history_id={int(action.get('history_id', -1))};"
+            f"stage={action.get('stage', 'object')};"
+            f"page={action.get('page', '0')};"
+            f"item_uid={action.get('item_uid', '')};"
+            f"item_label={action.get('item_label', '')}"
         )
         msg.height = 1
         msg.width = 1

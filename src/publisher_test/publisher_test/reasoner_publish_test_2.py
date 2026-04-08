@@ -6,7 +6,7 @@ import os
 import re
 import textwrap
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 import httpx
 import numpy as np
@@ -131,6 +131,8 @@ class ReasonerPublishTest2Node(Node):
         self.selected_objects: List[Dict[str, object]] = []
         self.selected_category: Optional[Dict[str, object]] = None
         self.selected_activity: Optional[Dict[str, object]] = None
+        self.navigation_history: List[Dict[str, object]] = []
+        self.page_selection_index: Dict[str, Set[str]] = {}
 
         self.handshake_complete = False
         self.handshake_sent = False
@@ -510,6 +512,10 @@ class ReasonerPublishTest2Node(Node):
             self._handle_rollback()
             return
 
+        if cmd == "undo_selection":
+            self._handle_undo_selection(meta)
+            return
+
     def _item_from_selection_slot(self, slot: int) -> Optional[Dict[str, object]]:
         local_idx = SLOT_TO_ITEM_INDEX.get(slot)
         if local_idx is None:
@@ -517,6 +523,70 @@ class ReasonerPublishTest2Node(Node):
         if local_idx < 0 or local_idx >= len(self.current_page_items):
             return None
         return self.current_page_items[local_idx]
+
+    @staticmethod
+    def _stage_page_key(stage: str, page: int) -> str:
+        return f"{stage}:{int(page)}"
+
+    def _record_navigation_snapshot(self) -> None:
+        self.navigation_history.append(
+            {
+                "stage": str(self.stage),
+                "page": int(self.current_page),
+            }
+        )
+
+    def _record_page_selection(self, stage: str, item: Dict[str, object], page: int) -> None:
+        uid = str(item.get("uid", "")).strip()
+        if not uid:
+            return
+        key = self._stage_page_key(stage, page)
+        if key not in self.page_selection_index:
+            self.page_selection_index[key] = set()
+        self.page_selection_index[key].add(uid)
+
+    def _remove_last_selected_object(self, uid: str) -> bool:
+        for idx in range(len(self.selected_objects) - 1, -1, -1):
+            if str(self.selected_objects[idx].get("uid", "")) == uid:
+                self.selected_objects.pop(idx)
+                return True
+        return False
+
+    def _clear_activity_state(self) -> None:
+        self.selected_activity = None
+        self.activity_candidates = []
+        self.activity_pages = []
+
+    def _clear_target_page_selections(self, stage: str, page: int) -> int:
+        key = self._stage_page_key(stage, page)
+        uids = self.page_selection_index.pop(key, set())
+        cleared_count = len(uids)
+
+        if stage == STAGE_OBJECT:
+            if uids:
+                self.selected_objects = [
+                    obj for obj in self.selected_objects
+                    if str(obj.get("uid", "")) not in uids
+                ]
+            return cleared_count
+
+        if stage == STAGE_CATEGORY:
+            if (
+                self.selected_category is not None
+                and str(self.selected_category.get("uid", "")) in uids
+            ):
+                self.selected_category = None
+            return cleared_count
+
+        if stage == STAGE_ACTIVITY:
+            if (
+                self.selected_activity is not None
+                and str(self.selected_activity.get("uid", "")) in uids
+            ):
+                self.selected_activity = None
+            return cleared_count
+
+        return cleared_count
 
     def _handle_selection(self, meta: Dict[str, str]) -> None:
         try:
@@ -539,6 +609,7 @@ class ReasonerPublishTest2Node(Node):
 
         if self.stage == STAGE_OBJECT:
             self.selected_objects.append(selected_item)
+            self._record_page_selection(STAGE_OBJECT, selected_item, self.current_page)
             self.get_logger().info(
                 f"StateA select: uid={selected_item['uid']}, label={selected_item['label']}, "
                 f"selected_total={len(self.selected_objects)}"
@@ -554,6 +625,7 @@ class ReasonerPublishTest2Node(Node):
 
         if self.stage == STAGE_CATEGORY:
             self.selected_category = selected_item
+            self._record_page_selection(STAGE_CATEGORY, selected_item, self.current_page)
             self.get_logger().info(
                 f"StateB select: category={selected_item['label']}, entering StateC"
             )
@@ -583,12 +655,14 @@ class ReasonerPublishTest2Node(Node):
 
         if self.stage == STAGE_OBJECT:
             if self.current_page < len(self.object_pages) - 1:
+                self._record_navigation_snapshot()
                 self.current_page += 1
                 self.get_logger().info(
                     f"StateA confirm: move to object page {self.current_page + 1}/{len(self.object_pages)}"
                 )
                 self._publish_current_page()
                 return
+            self._record_navigation_snapshot()
             self.stage = STAGE_CATEGORY
             self.current_page = 0
             self.get_logger().info("StateA confirm on last page: entering StateB")
@@ -596,6 +670,7 @@ class ReasonerPublishTest2Node(Node):
             return
 
         if self.current_page < len(pages) - 1:
+            self._record_navigation_snapshot()
             self.current_page += 1
             self.get_logger().info(
                 f"State {self.stage} confirm: next page {self.current_page + 1}/{len(pages)}"
@@ -603,59 +678,100 @@ class ReasonerPublishTest2Node(Node):
             self._publish_current_page()
             return
 
-        if self.stage in (STAGE_CATEGORY, STAGE_ACTIVITY):
-            self.get_logger().info(
-                f"State {self.stage} confirm on last page: reuse current page "
-                f"{self.current_page + 1} without re-publishing images"
-            )
-            self._publish_cmd(
-                "reuse_page",
-                stage=self.stage,
-                page=self.current_page,
-                group=self.current_group_id,
-                count=len(self.current_page_items),
+        self.get_logger().info(
+            f"State {self.stage} confirm ignored: no next page from "
+            f"{self.current_page + 1}/{len(pages)}"
+        )
+
+    def _handle_rollback(self) -> None:
+        if not self.navigation_history:
+            self.get_logger().warning(
+                f"rollback ignored: navigation history empty, current_stage={self.stage}"
             )
             return
 
+        target = self.navigation_history.pop()
+        target_stage = str(target.get("stage", STAGE_OBJECT))
+        target_page = int(target.get("page", 0))
+
+        self.stage = target_stage
+        pages = self._current_pages()
+        if not pages:
+            self.current_page = 0
+            self.get_logger().warning(
+                f"rollback target has no pages: stage={target_stage}"
+            )
+            return
+
+        self.current_page = max(0, min(target_page, len(pages) - 1))
+        cleared_count = self._clear_target_page_selections(self.stage, self.current_page)
         self.get_logger().info(
-            f"State {self.stage} confirm on last page: keep current page {self.current_page + 1}"
+            "rollback(confirm undo) to previous page: "
+            f"stage={self.stage}, page={self.current_page + 1}/{len(pages)}, "
+            f"cleared_selection_count={cleared_count}"
         )
         self._publish_current_page()
 
-    def _handle_rollback(self) -> None:
-        if self.stage == STAGE_OBJECT:
-            if not self.selected_objects:
-                self.get_logger().warning("StateA rollback ignored: no selected object history")
-                return
-            removed = self.selected_objects.pop()
-            uid = str(removed.get("uid", ""))
-            self.current_page = self.object_uid_to_page.get(uid, 0)
-            self.get_logger().info(
-                f"StateA rollback: removed uid={uid}, selected_total={len(self.selected_objects)}, "
-                f"back_to_page={self.current_page + 1}/{len(self.object_pages)}"
+    def _handle_undo_selection(self, meta: Dict[str, str]) -> None:
+        stage = str(meta.get("stage", "")).strip().lower()
+        item_uid = str(meta.get("item_uid", "")).strip()
+        try:
+            page = int(meta.get("page", "-1"))
+        except ValueError:
+            page = -1
+
+        if stage not in (STAGE_OBJECT, STAGE_CATEGORY, STAGE_ACTIVITY):
+            self.get_logger().warning(f"undo_selection ignored: invalid stage metadata={meta}")
+            return
+        if page < 0:
+            self.get_logger().warning(f"undo_selection ignored: invalid page metadata={meta}")
+            return
+        if not item_uid:
+            self.get_logger().warning(f"undo_selection ignored: empty item_uid metadata={meta}")
+            return
+
+        removed = False
+        if stage == STAGE_OBJECT:
+            removed = self._remove_last_selected_object(item_uid)
+        elif stage == STAGE_CATEGORY:
+            if (
+                self.selected_category is not None
+                and str(self.selected_category.get("uid", "")).strip() == item_uid
+            ):
+                self.selected_category = None
+                self._clear_activity_state()
+                removed = True
+        elif stage == STAGE_ACTIVITY:
+            if (
+                self.selected_activity is not None
+                and str(self.selected_activity.get("uid", "")).strip() == item_uid
+            ):
+                self.selected_activity = None
+                removed = True
+
+        key = self._stage_page_key(stage, page)
+        uids = self.page_selection_index.get(key)
+        if uids is not None:
+            uids.discard(item_uid)
+            if not uids:
+                self.page_selection_index.pop(key, None)
+
+        self.stage = stage
+        pages = self._current_pages()
+        if not pages:
+            self.current_page = 0
+            self.get_logger().warning(
+                f"undo_selection target has no pages: stage={stage}, item_uid={item_uid}"
             )
-            self._publish_current_page()
             return
 
-        if self.stage == STAGE_CATEGORY:
-            self.stage = STAGE_OBJECT
-            if self.selected_objects:
-                last_uid = str(self.selected_objects[-1].get("uid", ""))
-                self.current_page = self.object_uid_to_page.get(last_uid, self.current_page)
-            self.get_logger().info("StateB rollback: return to StateA")
-            self._publish_current_page()
-            return
-
-        if self.stage == STAGE_ACTIVITY:
-            self.stage = STAGE_CATEGORY
-            if self.selected_category is not None:
-                uid = str(self.selected_category.get("uid", ""))
-                self.current_page = self.category_uid_to_page.get(uid, 0)
-            else:
-                self.current_page = 0
-            self.get_logger().info("StateC rollback: return to StateB")
-            self._publish_current_page()
-            return
+        self.current_page = max(0, min(page, len(pages) - 1))
+        self.get_logger().info(
+            "undo_selection(selection undo): "
+            f"stage={self.stage}, page={self.current_page + 1}/{len(pages)}, "
+            f"item_uid={item_uid}, removed={removed}"
+        )
+        self._publish_current_page()
 
     def _extract_json_array(self, text: str) -> List[object]:
         raw = text.strip()
