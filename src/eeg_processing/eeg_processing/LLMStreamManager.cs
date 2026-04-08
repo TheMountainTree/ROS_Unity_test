@@ -56,7 +56,6 @@ public class LLMStreamManager : MonoBehaviour
 
     void Update()
     {
-        bool shouldAutoScroll = scrollRect == null || scrollRect.verticalNormalizedPosition <= 0.15f;
         lock (queueLock)
         {
             while (pendingPayloads.Count > 0)
@@ -69,10 +68,7 @@ public class LLMStreamManager : MonoBehaviour
         {
             llmText.text = ComposeRichText(textBuffer.ToString());
             isTextDirty = false;
-            if (shouldAutoScroll)
-            {
-                StartCoroutine(UpdateScrollPosition());
-            }
+            StartCoroutine(UpdateScrollPosition());
         }
     }
 
@@ -184,6 +180,7 @@ public class LLMStreamManager : MonoBehaviour
         yield return new WaitForEndOfFrame();
         if (scrollRect != null)
         {
+            Canvas.ForceUpdateCanvases();
             scrollRect.verticalNormalizedPosition = 0f;
         }
     }
