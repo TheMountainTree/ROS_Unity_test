@@ -39,6 +39,7 @@ setup(
             "ssvep_communication_node2 = eeg_processing.SSVEP_Communication_Node2:main",
             "ssvep_communication_node3 = eeg_processing.SSVEP_Communication_Node3:main",
             "ssvep_communication_node3_1 = eeg_processing.SSVEP_Communication_Node3_1:main",
+            "ssvep_communication_node4_test = eeg_processing.SSVEP_Communication_Node4_test:main",
         ],
     },
 )

@@ -106,6 +106,28 @@ ros2 run eeg_processing ssvep_communication_node3_1 --ros-args \
 
 # 8.1 启动reasoner 推理器节点
 ros2 run publisher_test reasoner_publish_test_2
+
+# 9. Node4_test: 集成真实 eTRCA 解码的完整流程
+#    包含: pretrain 数据采集 + 自动训练模型, decode 真实 EEG 解码, reasoner 多阶段交互
+
+# 9.1 Pretrain 模式 - 采集 EEG 数据并自动训练 eTRCA 模型
+#     注意：需要连接真实 EEG 设备 (TCP: 192.168.56.3:8712)
+ros2 run eeg_processing ssvep_communication_node4_test --ros-args \
+  -p run_mode:=pretrain
+
+# 9.2 Decode 模式 - 使用预训练模型进行真实 EEG 解码
+ros2 run eeg_processing ssvep_communication_node4_test --ros-args \
+  -p run_mode:=decode \
+  -p reasoner_mode_enabled:=true
+
+# 9.3 Reasoner 多阶段推理节点 (object -> category -> activity)
+#     默认读取 ./picture 目录下的图片
+ros2 run publisher_test reasoner_publish_test_3_test
+
+# 调试模式：跳过 EEG TCP 连接和 trigger 发送 (无真实设备时使用)
+# ros2 run eeg_processing ssvep_communication_node4_test --ros-args \
+#   -p run_mode:=pretrain \
+#   -p eeg_bypass_debug:=true
 ```
 
 ### 3. 测试与工具工具
@@ -174,7 +196,7 @@ ros2 run eeg_processing ssvep_communication_node2 --ros-args \
 - `reasoner.py`：reasoner 握手、分组、selection/rollback 逻辑
 - `SSVEP_Communication_Node3.py`：主节点初始化、调度、清理
 
-Node3 同样采用“静态配置 + 少量 ROS 覆盖”：
+Node3 同样采用”静态配置 + 少量 ROS 覆盖”：
 
 - 静态默认值：编辑 `src/eeg_processing/eeg_processing/ssvep_communication_node3_config.py`
 - 运行时可覆盖参数：
@@ -192,6 +214,158 @@ ros2 run eeg_processing ssvep_communication_node3 --ros-args \
   -p run_mode:=decode \
   -p reasoner_mode_enabled:=true
 ```
+
+### 7. Node4_test: 真实 eTRCA 解码完整流程
+
+`SSVEP_Communication_Node4_test.py` 是集成真实 EEG 解码的完整系统，支持：
+
+- **Pretrain 模式**：采集训练数据 → 自动训练 eTRCA 模型 → 保存权重
+- **Decode 模式**：加载预训练模型 → 真实 EEG 解码 → 返回选择结果
+- **Reasoner 集成**：与推理器节点配合实现多阶段交互
+
+#### 7.1 Pretrain 模式（数据采集 + 自动训练）
+
+**流程：**
+1. 发送 `cue` 命令 → Unity 显示目标提示
+2. 发送 `stim` 命令 + trigger 1 → Unity 开始闪烁，EEG 开始记录
+3. 发送 `rest` 命令 + trigger 2 → 停止闪烁，提取 EEG epoch
+4. 重复 24 trials (8 targets × 3 reps)
+5. 自动重采样 (1000Hz → 256Hz) 并训练 eTRCA 模型
+6. 保存模型到 `data/ssvep_etrca_model.pkl`
+
+**启动命令：**
+```bash
+# 终端1: 启动 Unity 通信桥接
+ros2 run ros_tcp_endpoint default_server_endpoint --ros-args -p ROS_IP:=0.0.0.0
+
+# 终端2: 启动主节点 (pretrain 模式，需要连接真实 EEG 设备)
+ros2 run eeg_processing ssvep_communication_node4_test --ros-args \
+  -p run_mode:=pretrain
+
+# 调试模式 (无真实 EEG 设备时使用)
+# ros2 run eeg_processing ssvep_communication_node4_test --ros-args \
+#   -p run_mode:=pretrain \
+#   -p eeg_bypass_debug:=true
+```
+
+**参数说明：**
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `run_mode` | `decode` | 运行模式：`pretrain` 或 `decode` |
+| `eeg_bypass_debug` | `false` | 调试模式，跳过 EEG TCP 和 trigger (无真实设备时使用) |
+| `save_dir` | `data/central_controller_ssvep_node4_test` | 数据保存目录 |
+| `etrca_model_path` | `data/ssvep_etrca_model.pkl` | 模型保存路径 |
+
+**输出文件：**
+- `ssvep4_pretrain_dataset_*.npy` - EEG epochs 数据集
+- `ssvep4_pretrain_trials_*.csv` - Trial 记录
+- `ssvep4_pretrain_metadata_*.csv` - Epoch 元数据
+- `ssvep_etrca_model.pkl` - 训练好的 eTRCA 模型
+
+#### 7.2 Decode + Reasoner 模式（真实 EEG 解码交互）
+
+**完整流程：**
+```
+┌─────────────────┐                    ┌─────────────────┐              ┌────────┐
+│ reasoner_       │  1. reasoner_ready │ Node4_test      │              │ Unity  │
+│ publish_test_   │ ─────────────────> │ (主节点)         │              │        │
+│ 3_test.py       │                    │                 │              │        │
+│ (推理器节点)     │  2. 图片批次        │                 │  3. 显示图片  │        │
+│                 │ ─────────────────> │                 │ ───────────> │        │
+│                 │                    │                 │              │        │
+│                 │                    │  4. EEG 采集    │  5. 刺激闪烁  │        │
+│                 │                    │ <───────────────────────────────│        │
+│                 │                    │                 │              │        │
+│                 │                    │  6. eTRCA 解码   │              │        │
+│                 │                    │ (加载预训练权重)  │              │        │
+│                 │                    │                 │              │        │
+│                 │  7. selection 结果  │                 │              │        │
+│                 │ <─────────────────│                 │              │        │
+│                 │                    │                 │              │        │
+│                 │  8. 下一批图片      │                 │              │        │
+│                 │ ─────────────────>│                 │              │        │
+└─────────────────┘                    └─────────────────┘              └────────┘
+```
+
+**启动命令：**
+```bash
+# 终端1: Unity 通信桥接
+ros2 run ros_tcp_endpoint default_server_endpoint --ros-args -p ROS_IP:=0.0.0.0
+
+# 终端2: 主节点 (decode + reasoner 模式，需要真实 EEG 设备和预训练模型)
+# 注意：必须先运行 pretrain 模式生成模型文件 data/ssvep_etrca_model.pkl
+ros2 run eeg_processing ssvep_communication_node4_test --ros-args \
+  -p run_mode:=decode \
+  -p reasoner_mode_enabled:=true
+
+# 终端3: 推理器节点 (多阶段: object -> category -> activity)
+# 默认读取 ./picture 目录下的图片
+ros2 run publisher_test reasoner_publish_test_3_test
+```
+
+#### 7.3 Reasoner 多阶段交互说明
+
+`reasoner_publish_test_3_test.py` 实现三阶段推理流程：
+
+| 阶段 | Stage | 说明 |
+|------|-------|------|
+| StateA | `object` | 物体选择，可多选，支持翻页 |
+| StateB | `category` | 类别选择，单选 |
+| StateC | `activity` | 活动选择，LLM 生成候选 |
+
+**槽位布局：**
+```
+┌─────┬─────┬─────┬─────┐
+│  0  │  1  │  2  │  3  │   Row 0: 图片槽位 0,1,2 + 确认(✓)
+├─────┼─────┼─────┼─────┤
+│  4  │  5  │  6  │  7  │   Row 1: 图片槽位 4,5,6 + 撤销(✗)
+└─────┴─────┴─────┴─────┘
+```
+
+**选择动作：**
+- **Slot 0,1,2,4,5,6**: 选择图片，记录到 history
+- **Slot 3 (确认)**: 翻页或进入下一阶段
+- **Slot 7 (撤销)**: 撤销上一步操作
+
+#### 7.4 eTRCA 解码流程
+
+```python
+# 1. EEG epoch 捕获 (trigger 1 -> trigger 2)
+epoch = dataset_x[-1]  # shape: (n_channels, n_samples)
+
+# 2. 重采样 1000Hz -> 256Hz
+epoch = signal.resample(epoch, n_samples, axis=1)
+
+# 3. eTRCA 解码
+predicted_label = decoder.decode(epoch)  # 返回 1-8
+
+# 4. 映射到槽位
+predicted_freq = ssvep_frequencies[predicted_label - 1]  # 8.0, 10.0, ..., 45.0 Hz
+slot_index = find_slot_with_frequency(predicted_freq)
+```
+
+**频率映射表：**
+| Label | 频率 (Hz) |
+|-------|-----------|
+| 1 | 8.0 |
+| 2 | 10.0 |
+| 3 | 12.0 |
+| 4 | 15.0 |
+| 5 | 20.0 |
+| 6 | 30.0 |
+| 7 | 40.0 |
+| 8 | 45.0 |
+
+#### 7.5 模块文件
+
+| 文件 | 功能 |
+|------|------|
+| `SSVEP_Communication_Node4_test.py` | 主节点，组合各模块 |
+| `decode_2_test.py` | Decode 模块，EEG 解码逻辑 |
+| `pretrain_2_test.py` | Pretrain 模块，自动训练逻辑 |
+| `reasoner_2_test.py` | Reasoner 模块，选择处理逻辑 |
+| `ssvep_communication_node4_test_config.py` | 静态配置 |
+| `ssvep_pipeline.py` | eTRCA 算法实现 (SSVEPPretrainer, SSVEPDecoder) |
 
 ## 目录结构 (Directory Structure)
 ```text
@@ -212,13 +386,19 @@ ROS_Unity_test/
 ## 系统演进与近期亮点 (Recent Evolutions)
 系统经过高强度迭代（详见 `dev_logs/`）：
 1. **TCP 替代 UDP 接收**: 由于脑电采样率要求高，已废弃 UDP 脑电数据监听，全面升级为具有可靠粘包和缓存处理能力的 `eeg_tcp_listener_node`，保障了底层数据稳定。
-2. **Epoch 精准提取**: SSVEP V3 预训练节点废弃了“基于预设时间硬截断”的机制，重构为直接侦听 TCP 数据流内的 trigger 通道 (`trigger=1` 开始, `trigger=2` 结束)，完美解决了变长 Epoch 的网络时延导致的抖动问题。
+2. **Epoch 精准提取**: SSVEP V3 预训练节点废弃了”基于预设时间硬截断”的机制，重构为直接侦听 TCP 数据流内的 trigger 通道 (`trigger=1` 开始, `trigger=2` 结束)，完美解决了变长 Epoch 的网络时延导致的抖动问题。
 3. **Decode EEG 采集闭环**: `CentralControllerSSVEPNode4.py` 将 decode 模式升级为可发送 trigger、接收 EEG TCP 数据、保存 decode `.npy` 数据集，并写出 decode EEG trial/meta CSV。
 4. **Node2 静态配置抽离**: `SSVEP_Communication_Node2.py` 现已把大部分 decode / pretrain / reasoner / 网络默认配置移到 `ssvep_communication_node2_config.py`，只保留少数联调参数继续通过 ROS 覆盖。
 5. **验证工具补全**: 除 `validate_ssvep3_npy.py` 外，新增 `validate_ssvep4_npy.py`，用于绘制 decode 阶段的 EEG epoch 图（默认单 epoch）。
 6. **Reasoner 闭环测试**: 新增 24 图/4 组 reasoner 测试模式，支持握手、history 回传、撤销回退，以及 history 缩略图固定尺寸（默认 `100x100`）。
-7. **Decode 控制拆分与停闪保留画面**: 当前主链路把 decode 控制命令拆到 `/ssvep_decode_cmd`，并将 `stop/done` 改为“停止闪烁但保留当前图片，直到下一批覆盖”。
+7. **Decode 控制拆分与停闪保留画面**: 当前主链路把 decode 控制命令拆到 `/ssvep_decode_cmd`，并将 `stop/done` 改为”停止闪烁但保留当前图片，直到下一批覆盖”。
 8. **Node3 模块化重构**: 新增 `SSVEP_Communication_Node3.py` 与 `decode.py / pretrain.py / reasoner.py`，主节点仅保留初始化与调度，配置默认值集中到 `ssvep_communication_node3_config.py`。
+9. **Node4_test 真实 EEG 解码集成**: 新增 `SSVEP_Communication_Node4_test.py`，实现完整闭环：
+   - Pretrain 模式：采集数据 → 自动训练 eTRCA 模型 → 保存权重文件
+   - Decode 模式：加载预训练模型 → 真实 EEG 解码 → 返回选择结果
+   - Reasoner 集成：与 `reasoner_publish_test_3_test.py` 配合实现多阶段交互 (object → category → activity)
+   - 采样率自动转换：EEG 数据 1000Hz → 256Hz 重采样后送入 eTRCA 算法
+10. **LLM 流式输出转发**: 新增 `/reasoner/llm_stream` → `/llm_output_stream` 话题转发，支持 Unity 前端实时显示 LLM 生成的活动候选。
 
 ## Node2 静态配置速览
 `SSVEP_Communication_Node2.py` 当前按设备而不是按模式组织默认网络配置：

@@ -47,8 +47,19 @@ ros2 run eeg_processing ssvep_communication_node3 --ros-args \
   -p run_mode:=decode \
   -p reasoner_mode_enabled:=true
 
+# Node3_1 with EEG bypass (for testing without hardware)
+ros2 run eeg_processing ssvep_communication_node3_1 --ros-args \
+  -p eeg_bypass_debug:=true \
+  -p reasoner_mode_enabled:=true
+
+# Node4_test with real EEG decoding
+ros2 run eeg_processing ssvep_communication_node4_test --ros-args \
+  -p run_mode:=pretrain \
+  -p eeg_bypass_debug:=true
+
 # Reasoner image batch test publisher
 ros2 run publisher_test reasoner_publish_test
+ros2 run publisher_test reasoner_publish_test_2
 
 # UDP trigger sender (for EEG synchronization testing)
 ros2 run publisher_test udp_sender_node --ros-args -p trigger_value:=1 -p remote_ip:=192.168.56.3
@@ -166,6 +177,43 @@ ros2 run eeg_processing ssvep_communication_node3 --ros-args \
   -p reasoner_mode_enabled:=true
 ```
 
+### Node4_test: Real EEG Decoding Integration
+
+**SSVEP_Communication_Node4_test** integrates real eTRCA decoding for EEG-based selection, replacing the mock_selected_index approach.
+
+**Key features:**
+- Automatic model training after pretrain (24 trials: 3 reps × 8 targets)
+- Real-time EEG decoding during decode mode
+- Strict mode: requires pre-trained model for decode mode
+
+**Module files:**
+- `SSVEP_Communication_Node4_test.py` - Main node
+- `decode_2_test.py` - DecodeModule with `_decode_epoch()`, `_map_predicted_to_slot()`
+- `pretrain_2_test.py` - PretrainModule with `_auto_train_model()`
+- `reasoner_2_test.py` - ReasonerModule for selection handling
+- `ssvep_communication_node4_test_config.py` - Configuration with `ETRCADecoderConfig`
+
+**Model file:** `data/ssvep_etrca_model.pkl`
+
+```bash
+# Pretrain mode: collect data and train model
+ros2 run eeg_processing ssvep_communication_node4_test --ros-args \
+  -p run_mode:=pretrain \
+  -p eeg_bypass_debug:=true
+
+# Decode mode: use trained model for real-time selection
+ros2 run eeg_processing ssvep_communication_node4_test --ros-args \
+  -p run_mode:=decode \
+  -p reasoner_mode_enabled:=true \
+  -p eeg_bypass_debug:=true
+```
+
+**Decoding flow:**
+1. SSVEPDecoder.decode(epoch) → predicted_label (1-8)
+2. predicted_label → ssvep_frequencies[label-1] → target frequency
+3. Find slot in current_trial_mapping with matching frequency
+4. Handle selection via `_handle_reasoner_selection(slot)`
+
 ### EEG Data Format
 
 Windows TCP stream format per sample:
@@ -195,6 +243,7 @@ python3 src/eeg_processing/eeg_processing/validate_ssvep4_npy.py
 - ROS2 (ament_python build system)
 - numpy, scipy, PIL
 - brainda (brainda module for SSVEP eTRCA algorithm)
+- metabci (metabci.brainda.algorithms for eTRCA/FBTRCA - required for Node4_test)
 - MNE (optional, for P300 data loading)
 
 ## Data Output
@@ -214,7 +263,31 @@ The codebase implements two SSVEP decoding approaches:
 
 Both use filterbank decomposition with configurable passbands.
 
+**eTRCA Parameters (Node4_test default):**
+- Target sampling rate: 256 Hz (resampled from 1000 Hz EEG)
+- Passband edges: `[(6, 50), (14, 50), (22, 50)]` Hz
+- Stopband edges: `[(4, 52), (12, 52), (20, 52)]` Hz
+- n_components: 1, ensemble: True
+
 Default SSVEP frequencies (8 targets): `[8.0, 10.0, 12.0, 15.0, 20.0, 30.0, 40.0, 45.0]` Hz
+
+**Target ID to Frequency Mapping (1-based):**
+| Target ID | Frequency (Hz) |
+|-----------|----------------|
+| 1 | 8.0 |
+| 2 | 10.0 |
+| 3 | 12.0 |
+| 4 | 15.0 |
+| 5 | 20.0 |
+| 6 | 30.0 |
+| 7 | 40.0 |
+| 8 | 45.0 |
+
+**Slot Layout (for reasoner mode):**
+- Row 0: slots 0, 1, 2, 3 (3 = checkmark/confirm)
+- Row 1: slots 4, 5, 6, 7 (7 = X/undo)
+- Image slots: 0, 1, 2, 4, 5, 6
+- Special action slots: 3 (confirm), 7 (undo)
 
 ## Image Coordinate Note
 
