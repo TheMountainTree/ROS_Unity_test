@@ -53,7 +53,7 @@ class EEGServerConfig:
 class DecodeConfig:
     image_publish_period: float = 0.5
     inter_trial_interval: float = 0.0
-    trial_duration_s: float = 4.0
+    trial_duration_s: float = 2.0
     pre_stim_hold_s: float = 1.5
     num_images: int = 6
     max_trials: int = 1
@@ -70,9 +70,9 @@ class DecodeConfig:
 
 @dataclass
 class PretrainConfig:
-    repetitions_per_target: int = 3
-    cue_duration_s: float = 2.0
-    stim_duration_s: float = 1.5
+    repetitions_per_target: int = 5
+    cue_duration_s: float = 1.0
+    stim_duration_s: float = 2.0
     rest_duration_s: float = 1.0
 
 
@@ -109,6 +109,21 @@ class ETRCADecoderConfig:
     n_components: int = 1
     ensemble: bool = True
     n_jobs: int = 1
+    decode_filter_enabled: bool = True
+    decode_bandpass_low_hz: float = 6.0
+    decode_bandpass_high_hz: float = 48.0
+    decode_bandpass_order: int = 4
+    decode_notch_hz: List[float] = field(default_factory=lambda: [50.0, 100.0])
+    decode_notch_q: float = 35.0
+    train_robust_norm_enabled: bool = True
+    train_bad_channel_low_ratio: float = 0.2
+    train_bad_channel_high_ratio: float = 10.0
+    train_bad_channel_suppress_factor: float = 0.0
+    decode_robust_norm_enabled: bool = True
+    decode_bad_channel_suppress_enabled: bool = True
+    decode_bad_channel_low_ratio: float = 0.2
+    decode_bad_channel_high_ratio: float = 10.0
+    decode_bad_channel_suppress_factor: float = 0.0
 
 
 @dataclass

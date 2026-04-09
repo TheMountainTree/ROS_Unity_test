@@ -437,9 +437,10 @@ class ReasonerModule:
 
         if selection == 7:
             if not self.reasoner_action_stack:
-                self.get_logger().warning(
-                    "selection slot=7 ignored because action stack is empty"
+                self.get_logger().info(
+                    "selection slot=7 with empty action stack: restart flashing current page"
                 )
+                self._start_next_decode_trial_with_current_images()
                 return
 
             current_stage = self._current_reasoner_stage()

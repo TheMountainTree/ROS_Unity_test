@@ -5,6 +5,7 @@ Extended from pretrain_1.py with automatic eTRCA model training after pretrain c
 """
 
 import csv
+import json
 import os
 import random
 import socket
@@ -397,12 +398,25 @@ class PretrainModule:
         """
         orig_fs = self.eeg_fs
         target_fs = self.etrca_config.srate
+        expected_samples = int(round(self.pretrain_stim_s * target_fs))
+        if expected_samples <= 0:
+            raise ValueError(
+                f"Invalid expected_samples={expected_samples} from "
+                f"pretrain_stim_s={self.pretrain_stim_s}, target_fs={target_fs}"
+            )
 
         resampled_epochs = []
         for epoch in self.dataset_x:
             # epoch shape: (n_channels, n_samples)
             n_samples = int(epoch.shape[1] * target_fs / orig_fs)
             resampled = signal.resample(epoch, n_samples, axis=1)
+            # Trigger edges may jitter by a few samples across trials; enforce
+            # one fixed length so model training tensors are stackable.
+            if resampled.shape[1] > expected_samples:
+                resampled = resampled[:, :expected_samples]
+            elif resampled.shape[1] < expected_samples:
+                pad_width = expected_samples - resampled.shape[1]
+                resampled = np.pad(resampled, ((0, 0), (0, pad_width)), mode="constant")
             resampled_epochs.append(resampled)
 
         X = np.stack(resampled_epochs, axis=0)  # (n_trials, n_channels, n_samples)
@@ -433,6 +447,46 @@ class PretrainModule:
                 f"unique_labels={np.unique(y).tolist()}"
             )
 
+            # Basic conditioning to reduce numerical singularities in TRCA GED.
+            X_train = X.astype(np.float64, copy=True)
+            X_train -= np.mean(X_train, axis=2, keepdims=True)
+            ch_std = np.std(X_train, axis=(0, 2))
+            self.get_logger().info(
+                f"Training channel std (after demean): {[float(v) for v in ch_std.tolist()]}"
+            )
+
+            # Robust channel statistics for normalization and bad-channel suppression.
+            n_channels = int(X_train.shape[1])
+            flat = np.transpose(X_train, (1, 0, 2)).reshape(n_channels, -1)
+            ch_med = np.median(flat, axis=1)
+            ch_mad = np.median(np.abs(flat - ch_med[:, np.newaxis]), axis=1)
+            ch_scale = 1.4826 * ch_mad
+            valid_scale = ch_scale > 1e-12
+            global_scale = (
+                float(np.median(ch_scale[valid_scale]))
+                if np.any(valid_scale)
+                else 1.0
+            )
+            floor_scale = max(1e-6, global_scale * 0.05)
+            safe_scale = np.maximum(ch_scale, floor_scale)
+
+            if bool(getattr(self.etrca_config, "train_robust_norm_enabled", True)):
+                X_train = X_train / safe_scale[np.newaxis, :, np.newaxis]
+
+            low_ratio = float(getattr(self.etrca_config, "train_bad_channel_low_ratio", 0.2))
+            high_ratio = float(getattr(self.etrca_config, "train_bad_channel_high_ratio", 10.0))
+            bad_mask = (ch_scale < global_scale * low_ratio) | (ch_scale > global_scale * high_ratio)
+            bad_indices = np.where(bad_mask)[0].astype(int).tolist()
+            suppress_factor = float(getattr(self.etrca_config, "train_bad_channel_suppress_factor", 0.0))
+            suppress_factor = min(1.0, max(0.0, suppress_factor))
+            if bad_indices:
+                X_train[:, bad_mask, :] *= suppress_factor
+
+            self.get_logger().info(
+                f"Training robust scales: {[float(v) for v in ch_scale.tolist()]}, "
+                f"bad_channels={bad_indices}, suppress_factor={suppress_factor}"
+            )
+
             # Create pretrainer with config
             pretrainer = SSVEPPretrainer(
                 srate=self.etrca_config.srate,
@@ -445,8 +499,30 @@ class PretrainModule:
                 n_jobs=self.etrca_config.n_jobs,
             )
 
-            # Fit the model
-            pretrainer.fit(X, y)
+            # Fit with progressive jitter retry for non-positive-definite B.
+            fit_error = None
+            for jitter in (0.0, 1e-8, 1e-7, 1e-6, 1e-5):
+                try:
+                    if jitter > 0.0:
+                        rng = np.random.default_rng(42)
+                        X_try = X_train + rng.normal(
+                            loc=0.0, scale=jitter, size=X_train.shape
+                        )
+                        self.get_logger().warning(
+                            f"Retry eTRCA fit with jitter={jitter:.1e}"
+                        )
+                    else:
+                        X_try = X_train
+                    pretrainer.fit(X_try, y)
+                    fit_error = None
+                    break
+                except Exception as e:
+                    fit_error = e
+                    if "not positive definite" not in str(e).lower():
+                        raise
+
+            if fit_error is not None:
+                raise fit_error
 
             # Save model
             model_path = self.etrca_config.model_path
@@ -455,6 +531,28 @@ class PretrainModule:
                 os.makedirs(model_dir, exist_ok=True)
 
             pretrainer.save(model_path)
+
+            # Sidecar profile for decode-time bad-channel suppression.
+            try:
+                sidecar_path = model_path + ".channel_profile.json"
+                with open(sidecar_path, "w", encoding="utf-8") as f:
+                    json.dump(
+                        {
+                            "n_channels": n_channels,
+                            "bad_channels": bad_indices,
+                            "robust_scales": [float(v) for v in ch_scale.tolist()],
+                            "global_scale": float(global_scale),
+                            "train_bad_channel_low_ratio": low_ratio,
+                            "train_bad_channel_high_ratio": high_ratio,
+                            "train_bad_channel_suppress_factor": suppress_factor,
+                        },
+                        f,
+                        ensure_ascii=True,
+                        indent=2,
+                    )
+                self.get_logger().info(f"Saved channel profile: {sidecar_path}")
+            except Exception as e:
+                self.get_logger().warning(f"Failed to save channel profile sidecar: {e}")
 
             self.get_logger().info(f"eTRCA model trained and saved to {model_path}")
 

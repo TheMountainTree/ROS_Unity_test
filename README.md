@@ -1,4 +1,4 @@
-# ROS2 Unity BCI System (脑机接口系统)
+ # ROS2 Unity BCI System (脑机接口系统)
 
 ## 项目简介 (Project Overview)
 本项目是一个基于 **ROS2 (Robot Operating System 2)** 和 **Unity** 构建的分布式脑机接口 (BCI) 系统。系统的主要目标是进行脑电 (EEG) 信号的采集、实时与离线处理（支持 SSVEP 和 P300 范式），并实现与 Unity 前端（用于视觉刺激呈现和交互）的低延迟跨平台通信。

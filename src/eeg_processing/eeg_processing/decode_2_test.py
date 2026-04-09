@@ -5,7 +5,9 @@ Extended from decode_1.py with eTRCA decoder integration for real EEG decoding.
 """
 
 import csv
+import collections
 import glob
+import json
 import os
 import random
 import re
@@ -36,6 +38,9 @@ class DecodeModule:
 
     Extended with eTRCA decoder integration for real EEG-based selection.
     """
+    # Frequency-class label(1..8) -> Unity/UI slot index(0..7).
+    _FREQ_SLOT_TO_UI_SLOT = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 7}
+    _UI_IMAGE_SLOTS = (0, 1, 2, 4, 5, 6)
 
     def _load_decode_config(self) -> None:
         self.decode_config = self.config.decode
@@ -58,6 +63,33 @@ class DecodeModule:
 
         # Load eTRCA decoder config
         self.etrca_config = self.config.etrca_decoder
+        self.decode_filter_enabled = bool(getattr(self.etrca_config, "decode_filter_enabled", True))
+        self.decode_bandpass_low_hz = float(getattr(self.etrca_config, "decode_bandpass_low_hz", 6.0))
+        self.decode_bandpass_high_hz = float(getattr(self.etrca_config, "decode_bandpass_high_hz", 48.0))
+        self.decode_bandpass_order = int(getattr(self.etrca_config, "decode_bandpass_order", 4))
+        self.decode_notch_hz = [float(v) for v in getattr(self.etrca_config, "decode_notch_hz", [50.0, 100.0])]
+        self.decode_notch_q = float(getattr(self.etrca_config, "decode_notch_q", 35.0))
+        self.decode_robust_norm_enabled = bool(
+            getattr(self.etrca_config, "decode_robust_norm_enabled", True)
+        )
+        self.decode_bad_channel_suppress_enabled = bool(
+            getattr(self.etrca_config, "decode_bad_channel_suppress_enabled", True)
+        )
+        self.decode_bad_channel_low_ratio = float(
+            getattr(self.etrca_config, "decode_bad_channel_low_ratio", 0.2)
+        )
+        self.decode_bad_channel_high_ratio = float(
+            getattr(self.etrca_config, "decode_bad_channel_high_ratio", 10.0)
+        )
+        self.decode_bad_channel_suppress_factor = float(
+            getattr(self.etrca_config, "decode_bad_channel_suppress_factor", 0.0)
+        )
+        # Candidate decode window derived from pretrain stim duration.
+        pretrain_cfg = getattr(self.config, "pretrain", None)
+        if pretrain_cfg is not None and float(pretrain_cfg.stim_duration_s) > 0.0:
+            self.decode_model_window_s = float(pretrain_cfg.stim_duration_s)
+        else:
+            self.decode_model_window_s = float(self.decode_trial_duration_s)
 
     def _init_decode_state(self) -> None:
         base_dynamic_slots = [1, 2, 3, 5, 6, 7]
@@ -81,6 +113,7 @@ class DecodeModule:
         )
         self.base_image_ids = list(range(1, self.decode_num_images + 1))
         self.current_trial_mapping: List[Tuple[int, int, float]] = []
+        self.current_active_ui_image_slots: List[int] = []
         self.publish_idx = 0
         self.next_publish_at = 0.0
         self.waiting_start_trial_id = -1
@@ -91,6 +124,12 @@ class DecodeModule:
         # Initialize decoder state
         self.decoder = None
         self.model_loaded = False
+        self.decode_success_samples = 0
+        self.decode_model_sample_candidates: List[int] = []
+        self.decode_length_search_done = False
+        self._decode_bandpass_sos = None
+        self._decode_notch_ba: List[Tuple[np.ndarray, np.ndarray]] = []
+        self.decode_profile_bad_channels: List[int] = []
 
     def _init_decode_sockets(self) -> None:
         self.history_udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -186,10 +225,71 @@ class DecodeModule:
         try:
             self.decoder = SSVEPDecoder.from_file(model_path)
             self.model_loaded = True
+            self.decode_model_sample_candidates = self._infer_model_sample_candidates()
+            self._load_channel_profile_sidecar(model_path)
             self.get_logger().info(f"Loaded eTRCA decoder from {model_path}")
+            if self.decode_model_sample_candidates:
+                self.get_logger().info(
+                    f"Decoder model sample candidates inferred: {self.decode_model_sample_candidates}"
+                )
         except Exception as e:
             self.get_logger().error(f"Failed to load decoder model: {e}")
             raise RuntimeError(f"Failed to load decoder model: {e}")
+
+    def _load_channel_profile_sidecar(self, model_path: str) -> None:
+        """Load bad-channel profile exported by pretrain."""
+        self.decode_profile_bad_channels = []
+        sidecar = model_path + ".channel_profile.json"
+        if not os.path.isfile(sidecar):
+            return
+        try:
+            with open(sidecar, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            indices = payload.get("bad_channels", [])
+            if isinstance(indices, list):
+                self.decode_profile_bad_channels = sorted(
+                    {
+                        int(v)
+                        for v in indices
+                        if isinstance(v, (int, float)) and int(v) >= 0
+                    }
+                )
+            if self.decode_profile_bad_channels:
+                self.get_logger().info(
+                    f"Loaded bad-channel profile: {self.decode_profile_bad_channels}"
+                )
+        except Exception as e:
+            self.get_logger().warning(f"Failed to load channel profile sidecar: {e}")
+
+    def _infer_model_sample_candidates(self) -> List[int]:
+        """Try to infer sample-length candidates from estimator internals."""
+        candidates: List[int] = []
+        estimator = getattr(self.decoder, "_estimator", None)
+        if estimator is None:
+            return candidates
+
+        def _collect(value) -> None:
+            if isinstance(value, np.ndarray):
+                if value.ndim >= 2:
+                    sample_len = int(value.shape[-1])
+                    if 16 <= sample_len <= 8192 and sample_len not in candidates:
+                        candidates.append(sample_len)
+                return
+            if isinstance(value, (list, tuple)):
+                for item in value[:64]:
+                    _collect(item)
+                return
+            if isinstance(value, dict):
+                for item in list(value.values())[:64]:
+                    _collect(item)
+
+        for value in vars(estimator).values():
+            _collect(value)
+            if len(candidates) >= 16:
+                break
+
+        candidates.sort()
+        return candidates
 
     def _resample_epoch_for_decode(self, epoch: np.ndarray) -> np.ndarray:
         """Resample single epoch from acquisition rate to model rate.
@@ -205,6 +305,181 @@ class DecodeModule:
 
         n_samples = int(epoch.shape[1] * target_fs / orig_fs)
         return signal.resample(epoch, n_samples, axis=1)
+
+    def _build_decode_filters(self, fs: float) -> None:
+        """Build bandpass and notch filters for decode preprocessing."""
+        self._decode_bandpass_sos = None
+        self._decode_notch_ba = []
+        if not self.decode_filter_enabled or fs <= 0:
+            return
+
+        nyquist = fs * 0.5
+        low = max(0.1, self.decode_bandpass_low_hz)
+        high = min(self.decode_bandpass_high_hz, nyquist - 0.5)
+        if high > low:
+            self._decode_bandpass_sos = signal.butter(
+                self.decode_bandpass_order,
+                [low, high],
+                btype="bandpass",
+                fs=fs,
+                output="sos",
+            )
+
+        for f0 in self.decode_notch_hz:
+            if f0 <= 0.0 or f0 >= nyquist:
+                continue
+            b, a = signal.iirnotch(w0=f0, Q=self.decode_notch_q, fs=fs)
+            self._decode_notch_ba.append((b, a))
+
+        self.get_logger().info(
+            "decode filters ready: "
+            f"enabled={self.decode_filter_enabled}, bandpass={low:.1f}-{high:.1f}Hz, "
+            f"notch={[round(v, 2) for v in self.decode_notch_hz if 0.0 < v < nyquist]}"
+        )
+
+    def _apply_decode_filters(self, epoch: np.ndarray, fs: float) -> np.ndarray:
+        """Apply basic decode filters to suppress mains and display noise."""
+        if not self.decode_filter_enabled or epoch.ndim != 2:
+            return epoch
+        if self._decode_bandpass_sos is None and not self._decode_notch_ba:
+            self._build_decode_filters(fs)
+
+        out = epoch.astype(np.float64, copy=False)
+        try:
+            if self._decode_bandpass_sos is not None:
+                out = signal.sosfiltfilt(self._decode_bandpass_sos, out, axis=1)
+            for b, a in self._decode_notch_ba:
+                out = signal.filtfilt(b, a, out, axis=1)
+        except Exception as e:
+            self.get_logger().warning(f"decode filtering failed, fallback to raw epoch: {e}")
+            return epoch
+        return out.astype(np.float32, copy=False)
+
+    def _apply_decode_channel_suppression(self, epoch: np.ndarray) -> np.ndarray:
+        """Robust channel normalization + static/dynamic bad-channel suppression."""
+        if epoch.ndim != 2:
+            return epoch
+
+        out = epoch.astype(np.float64, copy=True)
+        out -= np.median(out, axis=1, keepdims=True)
+        mad = np.median(np.abs(out), axis=1)
+        scale = 1.4826 * mad
+        valid = scale > 1e-12
+        global_scale = float(np.median(scale[valid])) if np.any(valid) else 1.0
+        floor = max(1e-6, global_scale * 0.05)
+        safe = np.maximum(scale, floor)
+
+        if self.decode_robust_norm_enabled:
+            out = out / safe[:, np.newaxis]
+
+        if not self.decode_bad_channel_suppress_enabled:
+            return out.astype(np.float32, copy=False)
+
+        dynamic_bad = (
+            (scale < global_scale * self.decode_bad_channel_low_ratio)
+            | (scale > global_scale * self.decode_bad_channel_high_ratio)
+        )
+        bad_idx = set(np.where(dynamic_bad)[0].astype(int).tolist())
+        bad_idx.update(
+            idx for idx in self.decode_profile_bad_channels if 0 <= idx < out.shape[0]
+        )
+        if bad_idx:
+            factor = min(1.0, max(0.0, float(self.decode_bad_channel_suppress_factor)))
+            for idx in sorted(bad_idx):
+                out[idx, :] *= factor
+            self.get_logger().warning(
+                f"decode bad-channel suppression: bad={sorted(bad_idx)}, factor={factor}"
+            )
+
+        return out.astype(np.float32, copy=False)
+
+    def _fit_epoch_to_samples(self, epoch: np.ndarray, expected_samples: int) -> np.ndarray:
+        """Return epoch truncated/padded to expected sample length."""
+        if expected_samples <= 0:
+            return epoch
+
+        current_samples = int(epoch.shape[1])
+        if current_samples == expected_samples:
+            return epoch
+
+        if current_samples > expected_samples:
+            return epoch[:, :expected_samples]
+
+        pad_width = expected_samples - current_samples
+        return np.pad(epoch, ((0, 0), (0, pad_width)), mode="constant")
+
+    def _predict_label_for_samples(
+        self,
+        epoch: np.ndarray,
+        expected_samples: int,
+    ) -> int:
+        """Predict one label using a fixed sample length."""
+        epoch_try = self._fit_epoch_to_samples(epoch, expected_samples)
+        if epoch_try.ndim == 2:
+            epoch_try = epoch_try[np.newaxis, :, :]
+        predicted = self.decoder.decode(epoch_try)
+        return int(predicted[0])
+
+    def _decode_epoch_with_window_voting(
+        self,
+        epoch: np.ndarray,
+        expected_samples: int,
+    ) -> int:
+        """Decode variable-length epochs by fixed-window voting."""
+        if expected_samples <= 0:
+            return -1
+
+        current_samples = int(epoch.shape[1])
+        if current_samples <= expected_samples:
+            return self._predict_label_for_samples(epoch, expected_samples)
+
+        n_full = current_samples // expected_samples
+        labels: List[int] = []
+        for i in range(n_full):
+            start = i * expected_samples
+            end = start + expected_samples
+            try:
+                labels.append(self._predict_label_for_samples(epoch[:, start:end], expected_samples))
+            except Exception:
+                continue
+
+        # If no full window succeeded, fall back to one fixed-length attempt.
+        if not labels:
+            return self._predict_label_for_samples(epoch, expected_samples)
+
+        voted = collections.Counter(labels).most_common(1)[0][0]
+        return int(voted)
+
+    def _search_working_decode_length(self, epoch: np.ndarray, center: int) -> int:
+        """Best-effort discovery of a model-compatible sample length."""
+        if center <= 0:
+            return -1
+        current_samples = int(epoch.shape[1])
+        low = max(128, center - 160)
+        high = min(current_samples, center + 160)
+        if high < low:
+            high = low
+
+        search_order: List[int] = []
+        for delta in range(0, max(center - low, high - center) + 1):
+            left = center - delta
+            right = center + delta
+            if low <= left <= high and left not in search_order:
+                search_order.append(left)
+            if low <= right <= high and right not in search_order:
+                search_order.append(right)
+
+        for expected_samples in search_order:
+            try:
+                label = self._decode_epoch_with_window_voting(epoch, expected_samples)
+                if label > 0:
+                    self.get_logger().info(
+                        f"Discovered decoder-compatible sample length: {expected_samples}"
+                    )
+                    return expected_samples
+            except Exception:
+                continue
+        return -1
 
     def _decode_epoch(self, epoch: np.ndarray) -> int:
         """Decode EEG epoch to predicted class label.
@@ -223,50 +498,99 @@ class DecodeModule:
         if self.eeg_fs != self.etrca_config.srate:
             epoch = self._resample_epoch_for_decode(epoch)
 
-        # Add batch dimension: (n_channels, n_samples) -> (1, n_channels, n_samples)
-        if epoch.ndim == 2:
-            epoch = epoch[np.newaxis, :, :]
+        # Basic preprocessing: bandpass + notch(50/100Hz) to suppress mains/monitor noise.
+        epoch = self._apply_decode_filters(epoch, float(self.etrca_config.srate))
+        epoch = self._apply_decode_channel_suppression(epoch)
 
-        try:
-            predicted = self.decoder.decode(epoch)
-            return int(predicted[0])
-        except Exception as e:
-            self.get_logger().error(f"Decoding failed: {e}")
-            return -1
+        # Build sample-length candidates:
+        # 1) last successful length, 2) current epoch length, 3) pretrain-window length.
+        current_samples = int(epoch.shape[1])
+        pretrain_samples = int(round(self.decode_model_window_s * self.etrca_config.srate))
+        candidate_lengths: List[int] = []
+        for value in (
+            self.decode_success_samples,
+            current_samples,
+            pretrain_samples,
+            *self.decode_model_sample_candidates,
+        ):
+            if value > 0 and value not in candidate_lengths:
+                candidate_lengths.append(value)
+
+        last_error: Optional[Exception] = None
+        for expected_samples in candidate_lengths:
+            try:
+                predicted = self._decode_epoch_with_window_voting(epoch, expected_samples)
+                if expected_samples != current_samples:
+                    self.get_logger().warning(
+                        f"Decode epoch length mismatch: got {current_samples}, "
+                        f"using {expected_samples} for decoder input."
+                    )
+                self.decode_success_samples = expected_samples
+                return int(predicted)
+            except Exception as e:
+                last_error = e
+                continue
+
+        # One-time adaptive search around pretrain-derived center.
+        if not self.decode_length_search_done:
+            self.decode_length_search_done = True
+            discovered = self._search_working_decode_length(epoch, pretrain_samples)
+            if discovered > 0:
+                try:
+                    predicted = self._decode_epoch_with_window_voting(epoch, discovered)
+                    self.decode_success_samples = discovered
+                    self.get_logger().warning(
+                        f"Decode epoch length mismatch: got {current_samples}, "
+                        f"auto-discovered {discovered} for decoder input."
+                    )
+                    return int(predicted)
+                except Exception as e:
+                    last_error = e
+
+        self.get_logger().error(f"Decoding failed: {last_error}")
+        return -1
 
     def _map_predicted_to_slot(self, predicted_label: int) -> int:
-        """Map predicted class label to slot index.
+        """Map predicted class label to UI slot index.
 
-        The predicted_label (1-8) corresponds to frequency index.
-        We need to find which slot in current_trial_mapping has that frequency.
+        Label semantics:
+        - labels 1..8 correspond to fixed frequency classes / fixed UI slots 0..7.
+        - image slots are 0,1,2,4,5,6 (must also be active in current batch).
+        - function slots are 3(confirm), 7(undo).
 
         Args:
             predicted_label: Predicted class label (1-based, 1-8)
 
         Returns:
-            Slot index (0, 1, 2, 4, 5, 6), or -1 if not found
+            UI slot index (0..7), or -1 if this prediction is invalid/inactive
         """
         if predicted_label < 1 or predicted_label > len(self.ssvep_frequencies):
             self.get_logger().warning(f"Invalid predicted_label={predicted_label}")
             return -1
 
-        predicted_freq = self.ssvep_frequencies[predicted_label - 1]
+        ui_slot = self._FREQ_SLOT_TO_UI_SLOT.get(predicted_label, -1)
+        if ui_slot < 0:
+            self.get_logger().warning(f"No UI slot mapping for predicted_label={predicted_label}")
+            return -1
 
-        # Find slot with matching frequency in current_trial_mapping
-        for slot_id, image_id, freq in self.current_trial_mapping:
-            if abs(freq - predicted_freq) < 0.01:
-                return slot_id
+        # For image slots, only accept currently active slots in this batch.
+        if ui_slot in self._UI_IMAGE_SLOTS:
+            if ui_slot not in self.current_active_ui_image_slots:
+                self.get_logger().warning(
+                    f"Predicted image slot={ui_slot} is inactive for current batch; "
+                    f"active_slots={self.current_active_ui_image_slots}"
+                )
+                return -1
+            return ui_slot
 
-        self.get_logger().warning(
-            f"No slot found for predicted_label={predicted_label}, freq={predicted_freq:.2f}Hz"
-        )
-        return -1
+        # Function slots (3=confirm, 7=undo) are always valid UI selections.
+        return ui_slot
 
     def _perform_eeg_decoding(self) -> int:
-        """Perform real EEG decoding and return predicted slot index.
+        """Perform real EEG decoding and return predicted UI slot index.
 
         Returns:
-            Slot index (0, 1, 2, 4, 5, 6), or -1 if decoding failed
+            UI slot index (0..7), or -1 if decoding failed
         """
         if not self.trial_state.epoch_saved:
             self.get_logger().warning("No epoch captured, cannot decode")
@@ -481,11 +805,15 @@ class DecodeModule:
             order = list(range(self.current_decode_num_images))
             random.shuffle(order)
         self.current_trial_mapping = []
+        self.current_active_ui_image_slots = []
         for i, slot_id in enumerate(trial_dynamic_slots):
             img_idx = order[i]
             image_id = self.base_image_ids[img_idx]
             freq = self.ssvep_frequencies[slot_id - 1]
             self.current_trial_mapping.append((slot_id, image_id, freq))
+            ui_slot = self._FREQ_SLOT_TO_UI_SLOT.get(slot_id, -1)
+            if ui_slot >= 0:
+                self.current_active_ui_image_slots.append(ui_slot)
 
         for slot_id, image_id, freq in self.current_trial_mapping:
             self.mapping_writer.writerow(
@@ -496,7 +824,8 @@ class DecodeModule:
         self.state = NodeState.DECODE_PUBLISHING
         self.get_logger().info(
             f"[Decode Trial {self.trial_idx}] prepared target={self.current_target_id} "
-            f"target_freq={self.current_freq_hz:.3f}Hz, start publishing {self.current_decode_num_images} images"
+            f"target_freq={self.current_freq_hz:.3f}Hz, start publishing {self.current_decode_num_images} images; "
+            f"active_image_slots={self.current_active_ui_image_slots}"
         )
 
     def _poll_decode_trial_started(self) -> int:
@@ -609,6 +938,10 @@ class DecodeModule:
             # Use real EEG decoding instead of mock selection
             selection = self._perform_eeg_decoding()
             if selection == -1:
+                self.get_logger().info(
+                    "EEG decode returned invalid/empty slot; restart flashing current page."
+                )
+                self._start_next_decode_trial_with_current_images()
                 return
             self._handle_reasoner_selection(selection)
             return
@@ -625,14 +958,14 @@ class DecodeModule:
                     self.current_decode_num_images,
                 )
 
-            _, image_id, _ = self.current_trial_mapping[self.publish_idx]
+            _, image_id, slot_freq = self.current_trial_mapping[self.publish_idx]
             self.image_pub.publish(
                 self._to_decode_image(
                     trial_id=self.trial_idx,
                     img_idx_1based=self.publish_idx + 1,
                     image_id=image_id,
                     target_id=self.current_target_id,
-                    freq=self.current_freq_hz,
+                    freq=slot_freq,
                 )
             )
 
