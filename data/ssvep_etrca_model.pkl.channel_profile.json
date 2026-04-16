@@ -1,0 +1,21 @@
+{
+  "n_channels": 8,
+  "bad_channels": [
+    4,
+    7
+  ],
+  "robust_scales": [
+    4.909875138821778,
+    3.6639187607829253,
+    4.835394640400129,
+    3.8056637951979764,
+    2049.464500087087,
+    1.0492131644456755,
+    2.50564241009035,
+    0.008825269260673835
+  ],
+  "global_scale": 3.7347912779904506,
+  "train_bad_channel_low_ratio": 0.2,
+  "train_bad_channel_high_ratio": 10.0,
+  "train_bad_channel_suppress_factor": 0.0
+}

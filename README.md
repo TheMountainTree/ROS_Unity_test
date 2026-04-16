@@ -125,9 +125,9 @@ ros2 run eeg_processing ssvep_communication_node4_test --ros-args \
 ros2 run publisher_test reasoner_publish_test_3_test
 
 # 调试模式：跳过 EEG TCP 连接和 trigger 发送 (无真实设备时使用)
-# ros2 run eeg_processing ssvep_communication_node4_test --ros-args \
-#   -p run_mode:=pretrain \
-#   -p eeg_bypass_debug:=true
+ros2 run eeg_processing ssvep_communication_node4_test --ros-args \
+  -p run_mode:=pretrain \
+  -p eeg_bypass_debug:=true
 ```
 
 ### 3. 测试与工具工具
@@ -137,6 +137,9 @@ ros2 run publisher_test udp_sender_node --ros-args -p trigger_value:=1 -p remote
 
 # 历史图像推流工具（向 Unity 异步发送操作记录）
 ros2 run eeg_processing history_sender_node
+
+# 获取Unity端的刷新频率
+tail -f ~/.config/unity3d/DefaultCompany/EEG_Robots/Player.log | grep "\[Display\]"
 ```
 
 ### 4. Reasoner 测试模式说明
@@ -163,6 +166,8 @@ ros2 run eeg_processing history_sender_node
 示例：
 ```bash
 ros2 param set /central_controller_ssvep_node3_1 mock_selected_index 0
+
+ros2 param set /central_controller_ssvep_node4_test mock_selected_index 0
 ```
 
 ### 5. Node2 配置说明

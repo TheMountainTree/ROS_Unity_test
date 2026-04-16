@@ -1,0 +1,3 @@
+trial_id,target_id,target_frequency_hz,trial_start_wall,trial_end_wall,start_status,stim_start_trigger_sent,stim_start_trigger_wall,stim_end_trigger_sent,stim_end_trigger_wall,stim_enter_abs,stim_exit_abs,epoch_start_abs,epoch_end_abs_inclusive,raw_samples,epoch_complete,epoch_saved
+1,1,8.684,2026-04-14T16:06:53.485,2026-04-14T16:06:57.506,started,1,2026-04-14T16:06:53.485,1,2026-04-14T16:06:57.506,5720,9720,5793,9814,4022,1,1
+2,2,9.706,2026-04-14T16:07:02.666,2026-04-14T16:07:06.685,started,1,2026-04-14T16:07:02.666,1,2026-04-14T16:07:06.685,14880,18920,14974,18993,4020,1,1

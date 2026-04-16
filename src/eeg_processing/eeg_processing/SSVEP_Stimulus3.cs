@@ -35,11 +35,18 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
     public string decodeCommandTopic = "/ssvep_decode_cmd";
     public string trainCommandTopic = "/ssvep_train_cmd";
     public bool useReliableQos = true;
-    public bool useManualRefreshRate = true;
+    public bool useManualRefreshRate = false;
     [Min(1)] public int manualRefreshRateHz = 165;
+    [Header("Decode Flash Colors")]
+    public Color decodeFlashOnColor = new Color(1f, 1f, 1f, 1f);
+    public Color decodeFlashOffColor = new Color(0.0f, 0.0f, 0.0f, 1.0f);
+    [Header("Image Flash")]
+    public bool flashImagesWithFrames = false;
+    [Range(0f, 1f)] public float imageFlashOnAlpha = 1f;
+    [Range(0f, 1f)] public float imageFlashOffAlpha = 0.2f;
 
     // 可见目标对应频率：target_id 1..8 -> UI 索引 0..7
-    public float[] ssvepFrequencies = { 8f, 10f, 12f, 15f, 20f, 30f, 40f, 45f };
+    public float[] ssvepFrequencies = { 8.684f, 9.706f, 11.0f, 11.786f, 12.692f, 13.75f, 15.0f, 18.333f };
 
     // --------------------------
     // Inspector：UDP 端点
@@ -156,6 +163,7 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
         stimulusPanel.SetActive(false);
         decodeStimStarted = false;
         SetAllFramesAlpha(0f);
+        SetAllImageAlpha(1f);
         UpdateActiveDecodeSlotCount(6);
         CacheDefaultImageTextures();
         InitializePretrainSolidTextures();
@@ -399,6 +407,7 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
         StopAllCoroutines();
         if (stimulusPanel != null) stimulusPanel.SetActive(true);
         SetAllFramesAlpha(0f);
+        SetAllImageAlpha(1f);
 
         ssvepCoroutines = new Coroutine[targetIndices.Length];
         for (int i = 0; i < targetIndices.Length; i++)
@@ -520,6 +529,7 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
         if (stimulusPanel != null) stimulusPanel.SetActive(true);
 
         SetAllFramesAlpha(0.15f);
+        SetAllImageAlpha(1f);
         ApplyPretrainTargetLayout(targetId);
 
         int frameIdx = TargetIdToFrameIndex(targetId);
@@ -537,6 +547,7 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
 
         ApplyPretrainTargetLayout(currentTargetId);
         SetAllFramesAlpha(0f);
+        SetAllImageAlpha(1f);
         ssvepCoroutines = new Coroutine[targetIndices.Length];
         for (int i = 0; i < targetIndices.Length; i++)
         {
@@ -571,8 +582,20 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
             else
             {
                 frameUIs[frameUiIndex].color = isOn
-                    ? new Color(1f, 1f, 1f, 1f)
-                    : new Color(1f, 1f, 1f, 0.1f);
+                    ? decodeFlashOnColor
+                    : decodeFlashOffColor;
+            }
+
+            if (flashImagesWithFrames
+                && imageUIs != null
+                && frameUiIndex >= 0
+                && frameUiIndex < imageUIs.Length
+                && imageUIs[frameUiIndex] != null
+                && imageUIs[frameUiIndex].gameObject.activeSelf)
+            {
+                Color baseColor = imageUIs[frameUiIndex].color;
+                float alpha = isOn ? imageFlashOnAlpha : imageFlashOffAlpha;
+                imageUIs[frameUiIndex].color = new Color(baseColor.r, baseColor.g, baseColor.b, alpha);
             }
 
             yield return null;
@@ -583,6 +606,7 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
     {
         StopAllCoroutines();
         SetAllFramesAlpha(0f);
+        SetAllImageAlpha(1f);
         if (stimulusPanel != null) stimulusPanel.SetActive(false);
 
         if (sendDecodeEndTrigger && visualMode == VisualMode.Decode && decodeStimStarted && currentTargetId > 0)
@@ -603,6 +627,7 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
     {
         StopAllCoroutines();
         SetAllFramesAlpha(0f);
+        SetAllImageAlpha(1f);
         if (stimulusPanel != null) stimulusPanel.SetActive(true);
 
         if (sendDecodeEndTrigger && visualMode == VisualMode.Decode && decodeStimStarted && currentTargetId > 0)
@@ -809,12 +834,24 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
         }
     }
 
+    void SetAllImageAlpha(float alpha)
+    {
+        if (imageUIs == null) return;
+        for (int i = 0; i < imageUIs.Length; i++)
+        {
+            if (imageUIs[i] == null) continue;
+            Color baseColor = imageUIs[i].color;
+            imageUIs[i].color = new Color(baseColor.r, baseColor.g, baseColor.b, alpha);
+        }
+    }
+
     void PrepareDecodeVisuals()
     {
         visualMode = VisualMode.Decode;
         StopAllCoroutines();
         if (stimulusPanel != null) stimulusPanel.SetActive(true);
         SetAllFramesAlpha(0f);
+        SetAllImageAlpha(1f);
     }
 
     void CacheDefaultImageTextures()

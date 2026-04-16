@@ -1,0 +1,2 @@
+trial_id,target_id,target_frequency_hz,trial_prepared_wall_time,trial_start_wall_time,trial_end_wall_time,planned_duration_s,actual_duration_s,start_trial_id,start_status
+1,8,18.333,2026-04-14T13:55:44.082,2026-04-14T13:55:48.202,2026-04-14T13:55:50.202,2.000,2.000,1,started

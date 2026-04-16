@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""SSVEP Communication Node4_test - With Real eTRCA EEG Decoding.
+"""SSVEP Communication Node4_test - With Runtime FBCCA EEG Decoding.
 
-This node extends Node3_1 with integrated eTRCA decoding for real-time
+This node extends Node3_1 with integrated FBCCA decoding for real-time
 EEG-based selection, replacing the mock_selected_index parameter approach.
 
 Key features:
-- Automatic model training after pretrain completion (24 trials: 3 reps x 8 targets)
-- Real-time EEG decoding during decode mode
-- Strict mode: requires pre-trained model for decode mode
+- Runtime FBCCA decoding during decode mode
+- Unified preprocessing + decoding component interface
+- Pretrain mode as EEG data recording only
 
 Usage:
-  # Pretrain mode (collect data and train model)
+  # Pretrain mode (collect EEG data only)
   ros2 run eeg_processing ssvep_communication_node4_test --ros-args \\
     -p run_mode:=pretrain \\
     -p eeg_bypass_debug:=true
 
-  # Decode mode (use trained model for real-time selection)
+  # Decode mode (runtime FBCCA for real-time selection)
   ros2 run eeg_processing ssvep_communication_node4_test --ros-args \\
     -p run_mode:=decode \\
     -p reasoner_mode_enabled:=true \\
@@ -42,11 +42,11 @@ from .utils import CircularEEGBuffer, NodeState, TrialState
 
 
 class CentralControllerSSVEPNode4Test(DecodeModule, PretrainModule, ReasonerModule, Node):
-    """Unified SSVEP controller with integrated eTRCA decoding.
+    """Unified SSVEP controller with integrated FBCCA decoding.
 
     This node combines:
     - DecodeModule: Decode mode with real EEG decoding
-    - PretrainModule: Pretrain mode with auto-training
+    - PretrainModule: Pretrain mode with data recording
     - ReasonerModule: Reasoner communication for image batches
     """
 
@@ -103,9 +103,10 @@ class CentralControllerSSVEPNode4Test(DecodeModule, PretrainModule, ReasonerModu
             f"eeg_bypass_debug={self.eeg_bypass_debug}"
         )
         self.get_logger().info(
-            "Node4_test eTRCA integration: "
-            f"model_path={self.etrca_config.model_path}, "
-            f"auto_train={self.etrca_config.auto_train_after_pretrain}"
+            "Node4_test FBCCA runtime integration: "
+            f"target_srate={self.fbcca_runtime_config.target_srate}, "
+            f"highpass={self.fbcca_runtime_config.highpass_cutoff_hz}Hz, "
+            f"notch={self.fbcca_runtime_config.notch_freqs_hz}"
         )
         self.get_logger().info(
             "Node4_test llm stream forward: "
@@ -157,11 +158,6 @@ class CentralControllerSSVEPNode4Test(DecodeModule, PretrainModule, ReasonerModu
             False,
             descriptor=desc("调试解耦模式：开启后旁路 EEG TCP 与 trigger 发送。"),
         )
-        self.declare_parameter(
-            "etrca_model_path",
-            self.config.etrca_decoder.model_path,
-            descriptor=desc("eTRCA 模型文件路径（覆盖静态配置）。"),
-        )
 
     def _load_all_configs(self) -> None:
         cfg = self.config
@@ -176,11 +172,6 @@ class CentralControllerSSVEPNode4Test(DecodeModule, PretrainModule, ReasonerModu
         cfg.decode.image_dir = self._param_str("image_dir")
         cfg.decode.max_trials = self._param_int("decode_max_trials")
         self.eeg_bypass_debug = self._param_bool("eeg_bypass_debug")
-
-        # Override eTRCA model path if parameter is set
-        model_path_override = self._param_str("etrca_model_path")
-        if model_path_override != self.config.etrca_decoder.model_path:
-            cfg.etrca_decoder.model_path = model_path_override
 
         self.image_topic = cfg.unity.image_topic
         self.command_topic = cfg.unity.command_topic
@@ -204,7 +195,7 @@ class CentralControllerSSVEPNode4Test(DecodeModule, PretrainModule, ReasonerModu
         os.makedirs(self.save_dir, exist_ok=True)
 
         self.reasoner_config = cfg.reasoner
-        self.etrca_config = cfg.etrca_decoder
+        self.fbcca_runtime_config = cfg.fbcca_runtime
 
         if cfg.eeg_server.n_channels <= 0:
             raise ValueError("eeg_n_channels must be > 0")
