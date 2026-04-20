@@ -5,7 +5,11 @@
       "Bash(python src/eeg_processing/eeg_processing/ssvep_processing_fbcca.py)",
       "Bash(python -c \"from metabci.brainda.algorithms.decomposition.cca import FBECCA; import inspect; print\\(inspect.signature\\(FBECCA.__init__\\)\\)\")",
       "Bash(python -c \"from metabci.brainda.algorithms.decomposition.cca import FBECCA; import inspect; print\\(inspect.signature\\(FBECCA.fit\\)\\)\")",
-      "Bash(python -c \":*)"
+      "Bash(python -c \":*)",
+      "Bash(python3 data/Data_Analysis/1_2.py)",
+      "Bash(python3 data/Data_Analysis/1_3.py)",
+      "Bash(python3 data/Data_Analysis/1_2_preprocess.py)",
+      "Bash(python3 data/Data_Analysis/1_3_preprocess.py)"
     ]
   }
 }
