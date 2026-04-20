@@ -14,7 +14,7 @@ OCCIPITAL = {"O1", "O2", "Oz"}
 FS = 1000
 
 # 预处理参数
-HIGHPASS_CUTOFF = 2.0
+HIGHPASS_CUTOFF = 6.0
 NOTCH_FREQS = [50.0, 100.0]
 NOTCH_Q = 35.0
 
@@ -34,7 +34,7 @@ def preprocess(trial):
 
 
 def main():
-    data_path = "data/central_controller_ssvep_node4_test/ssvep4_pretrain_dataset_20260414_161545.npy"
+    data_path = "data/central_controller_ssvep_node4_test/ssvep4_pretrain_dataset_20260416_164519.npy"
     d = np.load(data_path, allow_pickle=True).item()
     x_raw = d["x"]
     y = d["y"]

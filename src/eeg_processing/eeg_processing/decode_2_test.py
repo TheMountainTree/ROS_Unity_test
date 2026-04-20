@@ -35,9 +35,28 @@ class DecodeModule:
 
     Uses runtime FBCCA decoding for real EEG-based selection.
     """
-    # Frequency-class label(1..8) -> Unity/UI slot index(0..7).
-    _FREQ_SLOT_TO_UI_SLOT = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 7}
+    # UI slot conventions (0-based): image slots 0/1/2/4/5/6, function slots 3(confirm)/7(undo).
+    _UI_DYNAMIC_IMAGE_SLOTS = (0, 1, 2, 4, 5, 6)
     _UI_IMAGE_SLOTS = (0, 1, 2, 4, 5, 6)
+
+    def _consume_reasoner_selection(self) -> int:
+        """Resolve reasoner selection source for the current trial.
+
+        Returns:
+            UI slot index (0..7) when a selection is ready, or -1 when the
+            controller should keep waiting/restart.
+        """
+        selection = self._consume_cached_mock_selection()
+        if selection != -1:
+            self.get_logger().info(
+                f"[Decode Trial {self.trial_idx}] consume mock_selected_index={selection}"
+            )
+            return selection
+
+        if getattr(self, "eeg_bypass_debug", False):
+            return -1
+
+        return self._perform_eeg_decoding()
 
     def _load_decode_config(self) -> None:
         self.decode_config = self.config.decode
@@ -47,7 +66,6 @@ class DecodeModule:
         self.decode_max_trials = self.decode_config.max_trials
         self.decode_num_images = self.decode_config.num_images
         self.decode_pre_stim_hold_s = self.decode_config.pre_stim_hold_s
-        self.decode_start_wait_timeout_s = self.decode_config.start_wait_timeout_s
         self.decode_capture_wait_timeout_s = self.decode_config.capture_wait_timeout_s
         self.image_h = self.decode_config.image_height
         self.image_w = self.decode_config.image_width
@@ -61,8 +79,7 @@ class DecodeModule:
         self.fbcca_runtime_config = self.config.fbcca_runtime
 
     def _init_decode_state(self) -> None:
-        base_dynamic_slots = [1, 2, 3, 5, 6, 7]
-        self.decode_dynamic_target_ids = base_dynamic_slots[: self.decode_num_images]
+        self.decode_dynamic_ui_slots = list(self._UI_DYNAMIC_IMAGE_SLOTS[: self.decode_num_images])
         self.current_decode_num_images = self.decode_num_images
         self.history_stack: List[Dict[str, object]] = []
         self.reasoner_action_stack: List[Dict[str, object]] = []
@@ -80,7 +97,7 @@ class DecodeModule:
             if self.reasoner_mode_enabled
             else self._load_or_generate_images(self.decode_num_images)
         )
-        self.base_image_ids = list(range(1, self.decode_num_images + 1))
+        self.base_image_ids = list(range(self.decode_num_images))
         self.current_trial_mapping: List[Tuple[int, int, float]] = []
         self.current_active_ui_image_slots: List[int] = []
         self.publish_idx = 0
@@ -98,7 +115,6 @@ class DecodeModule:
 
     def _init_decode_sockets(self) -> None:
         self.history_udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self._init_decode_ack_receiver()
         self._init_trigger_sender()
         self._init_eeg_streaming(buffer_seconds=max(20.0, self.decode_trial_duration_s * 8.0))
 
@@ -111,7 +127,7 @@ class DecodeModule:
         self.mapping_writer = csv.writer(self.mapping_csv_file)
         self.trials_writer = csv.writer(self.trials_csv_file)
         self.mapping_writer.writerow(
-            ["trial_id", "slot_id", "image_id", "frequency_hz", "trial_prepared_wall_time"]
+            ["trial_id", "slot_index", "image_index", "frequency_hz", "trial_prepared_wall_time"]
         )
         self.trials_writer.writerow(
             [
@@ -186,7 +202,8 @@ class DecodeModule:
         """Map predicted class label to UI slot index.
 
         Label semantics:
-        - labels 1..8 correspond to fixed frequency classes / fixed UI slots 0..7.
+        - labels 1..8 correspond to fixed frequency classes.
+        - UI slot index is 0-based and equals label-1.
         - image slots are 0,1,2,4,5,6 (must also be active in current batch).
         - function slots are 3(confirm), 7(undo).
 
@@ -200,10 +217,7 @@ class DecodeModule:
             self.get_logger().warning(f"Invalid predicted_label={predicted_label}")
             return -1
 
-        ui_slot = self._FREQ_SLOT_TO_UI_SLOT.get(predicted_label, -1)
-        if ui_slot < 0:
-            self.get_logger().warning(f"No UI slot mapping for predicted_label={predicted_label}")
-            return -1
+        ui_slot = predicted_label - 1
 
         # For image slots, only accept currently active slots in this batch.
         if ui_slot in self._UI_IMAGE_SLOTS:
@@ -257,18 +271,30 @@ class DecodeModule:
         self._init_decode_sockets()
         self._init_decode_csv_files()
         self._ensure_eeg_connected(force=True)
+        bypass_debug = getattr(self, "eeg_bypass_debug", False)
+        eeg_source_text = (
+            "bypass_debug(wait_mock_selected_index)"
+            if bypass_debug
+            else "runtime_fbcca(eeg_tcp+trigger)"
+        )
+        transport_text = (
+            "trigger_send_udp=disabled, eeg_tcp=disabled"
+            if bypass_debug
+            else (
+                f"trigger_send_udp={self.trigger_local_ip}:{self.trigger_local_port}"
+                f"->{self.trigger_remote_ip}:{self.trigger_remote_port}, "
+                f"eeg_tcp={self.eeg_server_ip}:{self.eeg_server_port}"
+            )
+        )
 
         self.get_logger().info(
             "decode mode ready: "
             f"trial_duration={self.decode_trial_duration_s:.2f}s, max_trials={self.decode_max_trials}, "
             f"decode_num_images={self.decode_num_images}, hold={self.decode_pre_stim_hold_s:.2f}s, "
-            f"decode_ack_udp={self.decode_start_bind_ip}:{self.decode_start_port}, "
-            f"trigger_send_udp={self.trigger_local_ip}:{self.trigger_local_port}"
-            f"->{self.trigger_remote_ip}:{self.trigger_remote_port}, "
-            f"eeg_tcp={self.eeg_server_ip}:{self.eeg_server_port}, "
+            f"{transport_text}, "
             f"mapping_csv={self.mapping_csv_path}, trials_csv={self.trials_csv_path}, "
             f"decode_eeg_csv={self.decode_eeg_csv_path}, decode_meta={self.decode_meta_csv_path}, "
-            f"runtime=FBCCA"
+            f"runtime=FBCCA, epoch_source={eeg_source_text}"
         )
 
     @staticmethod
@@ -340,13 +366,19 @@ class DecodeModule:
         return frames[:n]
 
     def _to_decode_image(
-        self, trial_id: int, img_idx_1based: int, image_id: int, target_id: int, freq: float
+        self,
+        trial_id: int,
+        img_idx_0based: int,
+        image_id: int,
+        slot_index: int,
+        target_id: int,
+        freq: float,
     ) -> Image:
-        bgr = self.base_images[image_id - 1]
+        bgr = self.base_images[image_id]
         msg = Image()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = (
-            f"trial={trial_id};img={img_idx_1based};image_id={image_id};target={target_id};"
+            f"trial={trial_id};img={img_idx_0based};image_id={image_id};slot={slot_index};target={target_id};"
             f"freq={freq:.3f};dur={self.decode_trial_duration_s:.3f}"
         )
         msg.height = int(bgr.shape[0])
@@ -396,12 +428,12 @@ class DecodeModule:
                     self.state = NodeState.REASONER_WAIT_BATCH
                     return
             self.base_images = [item["image"] for item in self.current_reasoner_group_images]
-            self.base_image_ids = list(range(1, len(self.current_reasoner_group_images) + 1))
+            self.base_image_ids = list(range(len(self.current_reasoner_group_images)))
             self.current_decode_num_images = max(1, min(6, len(self.current_reasoner_group_images)))
-            trial_dynamic_slots = [1, 2, 3, 5, 6, 7][: self.current_decode_num_images]
+            trial_dynamic_slots = list(self._UI_DYNAMIC_IMAGE_SLOTS[: self.current_decode_num_images])
         else:
             self.current_decode_num_images = self.decode_num_images
-            trial_dynamic_slots = self.decode_dynamic_target_ids
+            trial_dynamic_slots = self.decode_dynamic_ui_slots
 
         if (
             (not self.reasoner_mode_enabled)
@@ -434,11 +466,9 @@ class DecodeModule:
         for i, slot_id in enumerate(trial_dynamic_slots):
             img_idx = order[i]
             image_id = self.base_image_ids[img_idx]
-            freq = self.ssvep_frequencies[slot_id - 1]
+            freq = self.ssvep_frequencies[slot_id]
             self.current_trial_mapping.append((slot_id, image_id, freq))
-            ui_slot = self._FREQ_SLOT_TO_UI_SLOT.get(slot_id, -1)
-            if ui_slot >= 0:
-                self.current_active_ui_image_slots.append(ui_slot)
+            self.current_active_ui_image_slots.append(slot_id)
 
         for slot_id, image_id, freq in self.current_trial_mapping:
             self.mapping_writer.writerow(
@@ -452,22 +482,6 @@ class DecodeModule:
             f"target_freq={self.current_freq_hz:.3f}Hz, start publishing {self.current_decode_num_images} images; "
             f"active_image_slots={self.current_active_ui_image_slots}"
         )
-
-    def _poll_decode_trial_started(self) -> int:
-        while True:
-            try:
-                payload, _ = self.decode_start_sock.recvfrom(128)
-            except BlockingIOError:
-                return -1
-            except OSError:
-                return -1
-            text = payload.decode("utf-8", errors="ignore").strip().lower()
-            if not text.startswith("trial_started="):
-                continue
-            try:
-                return int(text.split("=", 1)[1].strip())
-            except ValueError:
-                continue
 
     def _finalize_decode_trial(self) -> None:
         end_wall = self.trial_state.stim_end_wall or datetime.now().isoformat(timespec="milliseconds")
@@ -501,30 +515,37 @@ class DecodeModule:
         if self.reasoner_mode_enabled:
             self.state = NodeState.REASONER_WAIT_SELECTION
             self.state_until = 0.0
-            self.get_logger().info(
-                f"[Decode Trial {self.trial_idx}] waiting for EEG decode..."
-            )
+            if getattr(self, "eeg_bypass_debug", False):
+                self.get_logger().info(
+                    f"[Decode Trial {self.trial_idx}] waiting mock_selected_index, "
+                    f"cached={self.pending_mock_selection}"
+                )
+            else:
+                self.get_logger().info(
+                    f"[Decode Trial {self.trial_idx}] waiting for EEG decode..."
+                )
         else:
             self.state = NodeState.WAITING
             self.state_until = time.monotonic() + max(0.0, self.decode_iti)
 
-    def _enter_decode_stimulating(self, now: float, start_status: str, start_trial_id: int) -> None:
+    def _enter_decode_stimulating(self, now: float) -> None:
         self.state = NodeState.DECODE_STIMULATING
         self.trial_state.trial_start_mono = now
         self.trial_state.start_wall = datetime.now().isoformat(timespec="milliseconds")
-        self.trial_state.start_trial_id = start_trial_id
-        self.trial_state.start_status = start_status
+        self.trial_state.start_trial_id = self.trial_idx
+        self.trial_state.start_status = "command_sync"
         self.trial_state.stim_start_wall = self.trial_state.start_wall
         self.trial_state.stim_enter_abs = self.eeg_ring.latest_abs_index
         self.trial_state.epoch_mode = "decode"
         self.trial_state.stim_start_trigger_sent, self.trial_state.stim_start_trigger_wall = self._send_trigger(1)
+        self._publish_decode_cmd("stim", self.trial_idx, self.current_target_id)
 
     def _enter_decode_wait_capture(self, now: float) -> None:
-        self._publish_decode_stop(self.trial_idx)
         self.trial_state.decode_stop_mono = now
         self.trial_state.stim_end_wall = datetime.now().isoformat(timespec="milliseconds")
         self.trial_state.stim_exit_abs = self.eeg_ring.latest_abs_index
         self.trial_state.stim_end_trigger_sent, self.trial_state.stim_end_trigger_wall = self._send_trigger(2)
+        self._publish_decode_stop(self.trial_idx)
         self.state = NodeState.DECODE_WAIT_CAPTURE
         self.state_until = now + max(0.0, self.decode_capture_wait_timeout_s)
 
@@ -560,9 +581,10 @@ class DecodeModule:
             return
 
         if self.state == NodeState.REASONER_WAIT_SELECTION:
-            # Use real EEG decoding instead of mock selection
-            selection = self._perform_eeg_decoding()
+            selection = self._consume_reasoner_selection()
             if selection == -1:
+                if getattr(self, "eeg_bypass_debug", False):
+                    return
                 self.get_logger().info(
                     "EEG decode returned invalid/empty slot; restart flashing current page."
                 )
@@ -583,12 +605,13 @@ class DecodeModule:
                     self.current_decode_num_images,
                 )
 
-            _, image_id, slot_freq = self.current_trial_mapping[self.publish_idx]
+            slot_id, image_id, slot_freq = self.current_trial_mapping[self.publish_idx]
             self.image_pub.publish(
                 self._to_decode_image(
                     trial_id=self.trial_idx,
-                    img_idx_1based=self.publish_idx + 1,
+                    img_idx_0based=self.publish_idx,
                     image_id=image_id,
+                    slot_index=slot_id,
                     target_id=self.current_target_id,
                     freq=slot_freq,
                 )
@@ -611,32 +634,7 @@ class DecodeModule:
         if self.state == NodeState.DECODE_HOLD:
             if now < self.decode_hold_until:
                 return
-            self._publish_decode_cmd("stim", self.trial_idx, self.current_target_id)
-            self.state = NodeState.DECODE_WAIT_START
-            self.waiting_start_trial_id = self.trial_idx
-            self.waiting_start_since = now
-            return
-
-        if self.state == NodeState.DECODE_WAIT_START:
-            started_trial = self._poll_decode_trial_started()
-            if started_trial == self.waiting_start_trial_id:
-                self._enter_decode_stimulating(
-                    now=now,
-                    start_status="started",
-                    start_trial_id=started_trial,
-                )
-                return
-
-            timed_out = (
-                self.decode_start_wait_timeout_s > 0.0
-                and now - self.waiting_start_since >= self.decode_start_wait_timeout_s
-            )
-            if timed_out:
-                self._enter_decode_stimulating(
-                    now=now,
-                    start_status="timeout_force_start",
-                    start_trial_id=-1,
-                )
+            self._enter_decode_stimulating(now)
             return
 
         if self.state == NodeState.DECODE_STIMULATING:

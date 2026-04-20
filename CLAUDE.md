@@ -4,291 +4,221 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a ROS2 workspace for EEG-based Brain-Computer Interface (BCI) systems, integrating with Unity for visual stimuli presentation. The system supports SSVEP (Steady-State Visual Evoked Potential) and P300 paradigms for BCI applications.
+ROS2 workspace for EEG-based Brain-Computer Interface (BCI) systems, integrating with Unity for visual stimuli presentation. Supports SSVEP and P300 paradigms. The system runs on Ubuntu (ROS2 core) communicating with Windows (Unity + EEG amplifier software via Neuracle).
 
 ## Build Commands
 
 ```bash
-# Build all packages
-colcon build
-
-# Build specific package
-colcon build --packages-select eeg_processing
-colcon build --packages-select publisher_test
-colcon build --packages-select ros_tcp_endpoint
-
-# Build with symlink for development (recommended)
-colcon build --symlink-install
-
-# Source the workspace after building
-source install/setup.bash
+colcon build --symlink-install                           # Development build (recommended)
+colcon build --packages-select eeg_processing            # Build single package
+colcon test --packages-select eeg_processing             # Run tests
+colcon test-result --verbose                             # Inspect test failures
+source install/setup.bash                                # Source workspace after build
+python3 src/eeg_processing/eeg_processing/validate_ssvep4_npy.py  # Validate Node4_test output
+python3 src/eeg_processing/eeg_processing/validate_ssvep3_npy.py  # Validate Node3 output
 ```
 
-## Running Nodes
+For refactors, validate with `python -m py_compile` on touched modules plus `colcon build --packages-select eeg_processing`.
+
+## Key Nodes
 
 ```bash
-# Start ROS-TCP-Endpoint (Unity bridge)
+# Unity communication bridge (must start first)
 ros2 run ros_tcp_endpoint default_server_endpoint --ros-args -p ROS_IP:=0.0.0.0
 
-# EEG data TCP receiver (hardware interface)
-ros2 run publisher_test eeg_tcp_listener_node
+# Node4_test — current main version (FBCCA runtime decoding)
+ros2 run eeg_processing ssvep_communication_node4_test --ros-args -p run_mode:=pretrain
+ros2 run eeg_processing ssvep_communication_node4_test --ros-args -p run_mode:=decode -p reasoner_mode_enabled:=true
 
-# SSVEP controllers - Node3 and Node4 are current main versions
-ros2 run eeg_processing central_controller_ssvep_node3 --ros-args -p run_mode:=pretrain
-ros2 run eeg_processing central_controller_ssvep_node4 --ros-args -p run_mode:=decode
+# Reasoner image batch test (multi-stage: object -> category -> activity)
+ros2 run publisher_test reasoner_publish_test_3_test
 
-# Reasoner communication node2 (external image batch driver for decode/pretrain)
-ros2 run eeg_processing ssvep_communication_node2 --ros-args \
-  -p run_mode:=decode \
-  -p reasoner_mode_enabled:=true
-
-# Reasoner communication node3 (modular version)
-ros2 run eeg_processing ssvep_communication_node3 --ros-args \
-  -p run_mode:=decode \
-  -p reasoner_mode_enabled:=true
-
-# Node3_1 with EEG bypass (for testing without hardware)
-ros2 run eeg_processing ssvep_communication_node3_1 --ros-args \
-  -p eeg_bypass_debug:=true \
-  -p reasoner_mode_enabled:=true
-
-# Node4_test with real EEG decoding
-ros2 run eeg_processing ssvep_communication_node4_test --ros-args \
-  -p run_mode:=pretrain \
-  -p eeg_bypass_debug:=true
-
-# Reasoner image batch test publisher
-ros2 run publisher_test reasoner_publish_test
-ros2 run publisher_test reasoner_publish_test_2
-
-# UDP trigger sender (for EEG synchronization testing)
-ros2 run publisher_test udp_sender_node --ros-args -p trigger_value:=1 -p remote_ip:=192.168.56.3
-
-# Image publishers (for testing)
-ros2 run publisher_test image_publisher
-ros2 run publisher_test seg_image_publisher
-
-# History image sender (for Unity history display)
+# History image sender for Unity display
 ros2 run eeg_processing history_sender_node
 ```
+
+**Warning:** `eeg_bypass_debug:=true` completely disables EEG TCP reception and trigger sending. In decode mode this causes `_consume_reasoner_selection()` to always return -1, creating an infinite retry loop. Only use bypass in pretrain mode for UI/logic testing.
 
 ## Architecture
 
 ### System Topology
 
 ```
-┌─────────────────┐     TCP      ┌──────────────────┐
-│  EEG Amplifier  │ ──────────▶  │ eeg_tcp_listener │ ──▶ ROS2 Topics
-│ (Neuracle/Win)  │   port 8712  └──────────────────┘
-└─────────────────┘
-                                        │
-                                        ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                         ROS2 Network                            │
-│  ┌───────────────────────┐    ┌─────────────────────────────┐  │
-│  │ Central Controller    │◀──▶│  SSVEP/P300 Processing      │  │
-│  │ (Node3/Node4)         │    │  (eTRCA/FBCCA pipelines)    │  │
-│  └───────────┬───────────┘    └─────────────────────────────┘  │
-└──────────────┼──────────────────────────────────────────────────┘
-               │ ROS-TCP-Endpoint (Port 10000)
-               ▼
-┌─────────────────────┐     UDP (Triggers)
-│   Unity Frontend    │ ◀────────────────▶ ROS Nodes
-│  (Visual Stimulus)  │    Ports 9999/10000/10001/12001
-└─────────────────────┘
+EEG Amplifier (Windows) ──TCP 8712──▶ Node4_test (EEG TCP client) ──▶ CircularEEGBuffer
+                                                  │
+                           ┌──────────────────────┼───────────────────────┐
+                           │              ROS2 Network                    │
+                           │  Central Controller (Node4_test)             │
+                           │  ┌─ DecodeModule  (FBCCA decode state machine)
+                           │  ├─ PretrainModule (EEG TCP + epoch capture)
+                           │  └─ ReasonerModule (image batch + selection)
+                           └──────────────┬──────────────────────────────┘
+                                          │ ROS-TCP-Endpoint (Port 10000)
+                                          ▼
+                           Unity Frontend ◀────▶ UDP Triggers
+                           (Visual Stimulus)     Ports 9999/10000/10001/12001
 ```
 
-### Packages
+Note: Node4_test connects to EEG TCP server directly (not via `eeg_tcp_listener_node`). The `eeg_tcp_listener_node` is a standalone utility for raw EEG UDP/TCP streaming.
 
-**ros_tcp_endpoint** (src/ROS-TCP-Endpoint/)
-- Unity Robotics package for TCP bridge between Unity and ROS2
-- Entry point: `default_server_endpoint` on port 10000
+### Node4_test Architecture (Mixin Composition)
 
-**eeg_processing** (src/eeg_processing/)
-- Core BCI processing nodes
-- **CentralControllerSSVEPNode3**: Pretrain-focused node with EEG TCP + trigger-based epoch extraction
-- **CentralControllerSSVEPNode4**: Unified node supporting both decode and pretrain, with unified communication config
-- **SSVEP_Communication_Node2/Node3**: Reasoner/decode/pretrain communication nodes with static config defaults
-- **ssvep_pipeline.py**: eTRCA algorithm (requires training data)
-- **ssvep_processing_fbcca.py**: FBCCA algorithm (zero-training, reference signals only)
+```python
+class CentralControllerSSVEPNode4Test(DecodeModule, PretrainModule, ReasonerModule, Node):
+```
 
-**publisher_test** (src/publisher_test/)
-- Test utilities and hardware interfaces
-- **eeg_tcp_listener_node**: Core hardware interface, receives EEG data from Neuracle via TCP
-- **UdpSenderNode**: Sends trigger values via UDP for EEG synchronization
-- **reasoner_publish_test**: Test node for reasoner image batch mode (24 images from ~/Pictures/截图 in 4 groups)
+**Module files (all in `src/eeg_processing/eeg_processing/`):**
+- `SSVEP_Communication_Node4_test.py` — Main node, init, timer loop, cleanup
+- `decode_2_test.py` — `DecodeModule`: decode state machine, FBCCA invocation, label-to-slot mapping
+- `pretrain_2_test.py` — `PretrainModule`: EEG TCP polling, trigger processing, epoch capture, dataset save
+- `reasoner_2_test.py` — `ReasonerModule`: reasoner handshake, image batch protocol, selection/confirm/undo
+- `ssvep_communication_node4_test_config.py` — All static config via dataclasses (`FBCCARuntimeConfig`, etc.)
+- `ssvep_runtime_fbcca.py` — `SSVEPFBCCARuntime`: preprocessing + FBCCA decode wrapper (uses metabci)
+- `utils.py` — `CircularEEGBuffer` (ring buffer with absolute indexing), `NodeState`, `TrialState`
 
-### Key Data Flows
+**Maintenance rule:** Keep only wiring/parameters in `SSVEP_Communication_Node4_test.py`; edit behavior in the `_2_test` modules. All static defaults belong in `ssvep_communication_node4_test_config.py`; only high-frequency runtime toggles (`run_mode`, `reasoner_mode_enabled`, `mock_selected_index`, `save_dir`, `image_dir`, `decode_max_trials`, `eeg_bypass_debug`) are ROS parameters.
 
-1. **SSVEP Decode Mode (Node4)**:
-   - ROS publishes images to `/image_seg` (6 images per trial)
-   - ROS sends `prepare` → `stim` via `/ssvep_decode_cmd`
-   - Unity displays stimuli, sends `trial_started={trial_id}` via UDP to port 10000
-   - ROS sends trigger 1 (stim start) → trigger 2 (stim end) to Windows COM forwarder
-   - EEG data captured via TCP from Windows port 8712
-   - `stop`/`done` commands stop flashing but keep images displayed until next batch
+### Decode Mode State Machine
 
-2. **SSVEP Pretrain Mode (Node3/Node4)**:
-   - ROS publishes `cue` → `stim` → `rest` via `/ssvep_train_cmd`
-   - Unity displays cues and stimuli
-   - Triggers recorded via UDP: trigger 1 (stim start), trigger 2 (stim end)
-   - Epoch extraction based on trigger channel in TCP stream
+```
+INIT_WAIT → DECODE_PUBLISHING → DECODE_HOLD → DECODE_STIMULATING
+  → DECODE_WAIT_CAPTURE → REASONER_WAIT_SELECTION
+  → (REASONER_WAIT_BATCH or WAITING, then back to DECODE_PUBLISHING)
+```
 
-3. **Reasoner Mode (SSVEP_Communication_Node2/Node3)**:
-   - External node provides image batches via `/reasoner/images`
-   - Handshake: `ssvep_ready` ↔ `reasoner_ready` before trial flow
-   - Slot layout: row 0 = `0,1,2,3`, row 1 = `4,5,6,7` (3=checkmark, 7=X)
-   - `mock_selected_index` parameter simulates user selection
+Note: `DECODE_WAIT_START` is defined in `NodeState` enum but not used in the current Node4_test decode flow. The state `WAITING` is used for non-reasoner inter-trial intervals.
+
+### EEG Decode Pipeline (End-to-End)
+
+```
+1. TCP frames (8ch + trigger, float32) → _poll_eeg_tcp() → CircularEEGBuffer
+2. Trigger detection: trigger=1 records stim_start_abs, trigger=2 calls _capture_epoch()
+3. _capture_epoch() → eeg_ring.get_range() → raw epoch (n_channels, ~4000 samples at 1000Hz)
+4. _perform_eeg_decoding() → _decode_epoch(epoch)
+5. SSVEPFBCCARuntime.decode_epoch():
+   a. _apply_manual_channel_exclusion(): drop channels listed in manual_bad_channels
+   b. preprocess_epoch(): demean → detrend → bandpass 6-100Hz → notch 50/100Hz → resample to 256Hz
+   c. _ensure_estimator(): lazy-create FBSCCA with filterbank + sine/cosine references
+   d. estimator.predict() → predicted class index (0-based) → mapped to label (1-8)
+   e. Filter against active_ui_slots (reject inactive image slot predictions)
+6. _map_predicted_to_slot(): label-1 → UI slot (0-7); image slots also checked against current_active_ui_image_slots
+7. _handle_reasoner_selection(slot): image(0,1,2,4,5,6) / confirm(3) / undo(7)
+```
+
+**Important:** Bad channel handling in Node4_test runtime is manual-only (configured via `manual_bad_channels` in `FBCCARuntimeConfig`). There is no per-epoch automatic MAD-based bad channel detection at runtime — that exists in offline analysis scripts only.
+
+**Important:** Active slot filtering happens twice — once inside `decode_epoch()` (rejects predictions for inactive image slots) and again in `_map_predicted_to_slot()`. This is redundant but harmless.
+
+**Important:** In non-reasoner decode mode, the state machine goes `WAITING → _prepare_decode_trial` and never enters `REASONER_WAIT_SELECTION`, so FBCCA decode results are never consumed. Non-reasoner decode is effectively an EEG data recording mode.
+
+### Frequency and Slot Mapping
+
+**SSVEP frequencies (8 targets, Node4_test config):**
+`[8.684, 9.706, 11.0, 11.786, 12.692, 13.75, 15.0, 18.333]` Hz
+
+| Label | Frequency | UI Slot | Type |
+|-------|-----------|---------|------|
+| 1 | 8.684 Hz | 0 | image |
+| 2 | 9.706 Hz | 1 | image |
+| 3 | 11.0 Hz | 2 | image |
+| 4 | 11.786 Hz | 3 | **confirm** |
+| 5 | 12.692 Hz | 4 | image |
+| 6 | 13.75 Hz | 5 | image |
+| 7 | 15.0 Hz | 6 | image |
+| 8 | 18.333 Hz | 7 | **undo** |
+
+**Slot layout:**
+```
+┌─────┬─────┬─────┬─────┐
+│  0  │  1  │  2  │  3  │   Row 0: images + confirm(✓)
+├─────┼─────┼─────┼─────┤
+│  4  │  5  │  6  │  7  │   Row 1: images + undo(✗)
+└─────┴─────┴─────┴─────┘
+```
+
+Image slots: 0, 1, 2, 4, 5, 6. Function slots: 3 (confirm), 7 (undo). The mapping is label-1 = slot index, so each frequency maps directly to its corresponding UI slot.
+
+**Slot-to-group-image mapping** (reasoner_2_test.py): `{0:0, 1:1, 2:2, 4:3, 5:4, 6:5}` — maps UI slot to 0-based index within the 6-item reasoner batch. Must match `SLOT_TO_ITEM_INDEX` in `reasoner_publish_test_2.py`.
+
+### Reasoner Protocol
+
+Handshake: node publishes `ssvep_ready` → reasoner responds `reasoner_ready`.
+
+Multi-stage flow (via `reasoner_publish_test_2`/`reasoner_publish_test_3_test`): object → category → activity.
+
+Selection actions:
+- Image slot (0,1,2,4,5,6): record to history, publish `cmd=selection` to reasoner; if same stage+item_uid as top of history stack, skip as duplicate and restart flashing
+- Confirm (3): publish `cmd=confirm` (page-forward/stage-forward)
+- Undo (7): pop last action from action stack — if confirm, publish `cmd=rollback`; if selection, remove history item + publish `cmd=undo_selection` + send history UDP `delete_last`
+- Invalid (-1): restart flashing current images (`_start_next_decode_trial_with_current_images`)
+
+Reasoner LLM stream: `reasoner_publish_test_2` publishes JSON events (`type=reset|append|done|error`) on `/reasoner/llm_stream`; Node4_test forwards to `/llm_output_stream` for Unity display.
 
 ### ROS Topics
 
-- `/image_seg`: Image batch for SSVEP (6 images per trial, frame_id contains trial/target metadata)
-- `/ssvep_train_cmd`: Training commands for pretrain mode (cue/stim/rest/done)
-- `/ssvep_decode_cmd`: Control commands for decode mode (prepare/stim/stop/done)
-- `/history_image`: History images for Unity display (default 120x120 thumbnails)
-- `/reasoner/images`: External image batch input for reasoner mode
-- `/reasoner/feedback`: Feedback to reasoner node
+- `/image_seg` — Image batch (6 images/trial, frame_id carries trial/target/freq metadata)
+- `/ssvep_decode_cmd` — Decode commands (prepare/stim/stop/done/batch_start/batch_end)
+- `/ssvep_train_cmd` — Pretrain commands (cue/stim/rest/done)
+- `/reasoner/images` — External image batch input (from reasoner_publish_test_2)
+- `/reasoner/feedback` — Feedback to reasoner (selection/confirm/undo/rollback)
+- `/history_image` — History thumbnails for Unity (default 140x140)
+- `/reasoner/llm_stream` → `/llm_output_stream` — LLM stream forwarding
 
-### Network Configuration (Node4 defaults)
+### Network Configuration (Node4_test defaults)
 
-- Unity decode UDP: `0.0.0.0:10000`
-- Unity pretrain UDP: `0.0.0.0:10001`
+- Unity decode trigger UDP: `127.0.0.1:9999` (byte marker: 100+target=start, 200+target=end)
+- Unity decode ack UDP: `0.0.0.0:10000`
+- Unity pretrain trigger UDP: `0.0.0.0:10001`
 - Ubuntu trigger sender: `192.168.56.103:5006`
 - Windows COM forwarder: `192.168.56.3:8888`
 - Windows EEG TCP: `192.168.56.3:8712`
+- History UDP: `127.0.0.1:12001`
 
-### SSVEP Communication Nodes
-
-**SSVEP_Communication_Node2** and **SSVEP_Communication_Node3** are modular nodes supporting decode/pretrain with optional reasoner integration.
-
-- Static config files: `ssvep_communication_node2_config.py` / `ssvep_communication_node3_config.py`
-- Node3 is modular: `decode.py` + `pretrain.py` + `reasoner.py` + main node
-- Runtime ROS parameter overrides: `run_mode`, `reasoner_mode_enabled`, `mock_selected_index`, `save_dir`, `image_dir`, `decode_max_trials`
-
-```bash
-# Node2
-ros2 run eeg_processing ssvep_communication_node2 --ros-args \
-  -p run_mode:=decode \
-  -p reasoner_mode_enabled:=true
-
-# Node3 (modular version)
-ros2 run eeg_processing ssvep_communication_node3 --ros-args \
-  -p run_mode:=decode \
-  -p reasoner_mode_enabled:=true
-```
-
-### Node4_test: Real EEG Decoding Integration
-
-**SSVEP_Communication_Node4_test** integrates real eTRCA decoding for EEG-based selection, replacing the mock_selected_index approach.
-
-**Key features:**
-- Automatic model training after pretrain (24 trials: 3 reps × 8 targets)
-- Real-time EEG decoding during decode mode
-- Strict mode: requires pre-trained model for decode mode
-
-**Module files:**
-- `SSVEP_Communication_Node4_test.py` - Main node
-- `decode_2_test.py` - DecodeModule with `_decode_epoch()`, `_map_predicted_to_slot()`
-- `pretrain_2_test.py` - PretrainModule with `_auto_train_model()`
-- `reasoner_2_test.py` - ReasonerModule for selection handling
-- `ssvep_communication_node4_test_config.py` - Configuration with `ETRCADecoderConfig`
-
-**Model file:** `data/ssvep_etrca_model.pkl`
-
-```bash
-# Pretrain mode: collect data and train model
-ros2 run eeg_processing ssvep_communication_node4_test --ros-args \
-  -p run_mode:=pretrain \
-  -p eeg_bypass_debug:=true
-
-# Decode mode: use trained model for real-time selection
-ros2 run eeg_processing ssvep_communication_node4_test --ros-args \
-  -p run_mode:=decode \
-  -p reasoner_mode_enabled:=true \
-  -p eeg_bypass_debug:=true
-```
-
-**Decoding flow:**
-1. SSVEPDecoder.decode(epoch) → predicted_label (1-8)
-2. predicted_label → ssvep_frequencies[label-1] → target frequency
-3. Find slot in current_trial_mapping with matching frequency
-4. Handle selection via `_handle_reasoner_selection(slot)`
+Note: Unity decode markers (port 9999) and EEG trigger injection (port 8888) are separate systems. Trigger=1/2 via port 8888 is what drives epoch alignment; decode markers on 9999 are for logging only.
 
 ### EEG Data Format
 
-Windows TCP stream format per sample:
+TCP stream per frame (little-endian float32):
 ```
-Ch1(4B) -> Ch2(4B) -> ... -> ChN(4B) -> Trigger(4B) -> Next Ch1...
+Ch1(4B) → Ch2(4B) → ... → Ch8(4B) → Trigger(4B) = 36 bytes/frame
 ```
+Last float is trigger channel: 1 = stim start, 2 = stim end. Default: 8 channels, 1000 Hz, 9 floats/frame.
 
-Last float32 in each frame is the trigger channel (1=stim start, 2=stim end).
+### FBCCA Runtime Parameters (Node4_test actual defaults)
 
-Default EEG parameters: 8 channels, 1000 Hz sampling rate, 9 floats per frame (8 channels + trigger).
+Preprocessing: target_srate=256Hz, bandpass=6-100Hz (order 4), notch=[50,100]Hz (Q=35)
+Filterbank: 3 subbands, wp=[(6,50),(14,50),(22,50)], ws=[(4,52),(12,52),(20,52)]
+Decode: n_components=1, n_harmonics=4, filter weights=(n+1)^(-1.25)+0.25
+Bad channel: manual only, default drops ["P4","PO4","O2"] from ["O1","O2","Oz","PO3","PO4","Pz","P3","P4"]
 
-## Validation & Testing
+### Unity Side (SSVEP_Stimulus4.cs)
 
-```bash
-# Run ROS2 package tests
-colcon test --packages-select eeg_processing
-
-# Validate pretrain data (Node3)
-python3 src/eeg_processing/eeg_processing/validate_ssvep3_npy.py
-
-# Validate decode data (Node4)
-python3 src/eeg_processing/eeg_processing/validate_ssvep4_npy.py
-```
-
-## Dependencies
-
-- ROS2 (ament_python build system)
-- numpy, scipy, PIL
-- brainda (brainda module for SSVEP eTRCA algorithm)
-- metabci (metabci.brainda.algorithms for eTRCA/FBTRCA - required for Node4_test)
-- MNE (optional, for P300 data loading)
+`ROS2SSVEPStimulator2` subscribes to `/image_seg`, `/ssvep_decode_cmd`, `/ssvep_train_cmd`. It renders SSVEP flashing patterns using frame-counter-based on/off patterns built from `ssvepFrequencies` and the detected refresh rate. Decode image routing: `decodeImageIndices = {0,1,2,4,5,6}` maps batch indices 0-5 to UI slots. Confirm/rollback slots (3/7) always show default icons during decode.
 
 ## Data Output
 
-Generated data is stored under `data/`:
-- `data/central_controller_ssvep3/` - Node3/Node2 outputs
-- `data/central_controller_ssvep_node3/` - Node3 communication node outputs
-- Files: `*_dataset_*.npy` (EEG epochs), `*_trials_*.csv` (trial info), `*_metadata_*.csv` (metadata), `plots/` (validation plots)
+- `data/central_controller_ssvep_node4_test/` — Node4_test outputs
+- `data/central_controller_ssvep3/` — Node3 outputs
+- Files: `*_dataset_*.npy` (EEG epochs), `*_trials_*.csv` (trial info), `*_metadata_*.csv`, `*_mapping_*.csv`, `*_eeg_trials_*.csv`
 
-## SSVEP Algorithm Notes
+## Dependencies
 
-The codebase implements two SSVEP decoding approaches:
+- ROS2 (ament_python build system, ament_flake8, ament_pep257 linters)
+- numpy, scipy, PIL
+- metabci (`metabci.brainda.algorithms` for FBSCCA, generate_filterbank, generate_cca_references)
+- MNE (optional, for P300 data loading)
 
-1. **eTRCA** in `ssvep_pipeline.py`: Ensemble Task-Related Component Analysis - requires training data to learn spatial filters. Higher accuracy with sufficient training.
+## Image Coordinate Convention
 
-2. **FBCCA** in `ssvep_processing_fbcca.py`: Filter-Bank Standard CCA - uses sinusoidal reference signals, no training required.
+ROS/OpenCV origin: top-left (Y down). Unity origin: bottom-left (Y up). Images published to Unity must be vertically flipped (`np.flipud`).
 
-Both use filterbank decomposition with configurable passbands.
+## Coding Conventions
 
-**eTRCA Parameters (Node4_test default):**
-- Target sampling rate: 256 Hz (resampled from 1000 Hz EEG)
-- Passband edges: `[(6, 50), (14, 50), (22, 50)]` Hz
-- Stopband edges: `[(4, 52), (12, 52), (20, 52)]` Hz
-- n_components: 1, ensemble: True
-
-Default SSVEP frequencies (8 targets): `[8.0, 10.0, 12.0, 15.0, 20.0, 30.0, 40.0, 45.0]` Hz
-
-**Target ID to Frequency Mapping (1-based):**
-| Target ID | Frequency (Hz) |
-|-----------|----------------|
-| 1 | 8.0 |
-| 2 | 10.0 |
-| 3 | 12.0 |
-| 4 | 15.0 |
-| 5 | 20.0 |
-| 6 | 30.0 |
-| 7 | 40.0 |
-| 8 | 45.0 |
-
-**Slot Layout (for reasoner mode):**
-- Row 0: slots 0, 1, 2, 3 (3 = checkmark/confirm)
-- Row 1: slots 4, 5, 6, 7 (7 = X/undo)
-- Image slots: 0, 1, 2, 4, 5, 6
-- Special action slots: 3 (confirm), 7 (undo)
-
-## Image Coordinate Note
-
-ROS/OpenCV image origin is top-left (Y down), Unity origin is bottom-left (Y up). Images published to Unity must be vertically flipped.
+- Python: PEP 8, 4-space indentation. Lint gates: `ament_flake8` + `ament_pep257`.
+- Node/module naming: descriptive snake_case files with CamelCase class names.
+- New SSVEP controllers should use shared helpers from `utils.py` (`CircularEEGBuffer`, `NodeState`, `TrialState`) rather than redefining them.
+- Static config defaults belong in `ssvep_communication_node*_config.py` dataclasses; only high-frequency runtime toggles are ROS parameters.
+- Node4_test decode slot conventions: full UI slots `0..7`; image slots `0,1,2,4,5,6`; confirm=3, undo=7. Decode label mapping: label-1 = slot index, kept aligned with reasoner slot semantics.
+- Node4_test decode image metadata is 0-based end-to-end: `img=0..5`, `image_id=0..N-1`, reasoner frame `index=0..5`.
+- Node4_test is fixed to runtime FBCCA (no eTRCA path). Algorithm internals stay in `ssvep_runtime_fbcca.py`; controllers call only unified runtime APIs.
+- Commit format: short imperative summary, often in Chinese/English. One logical change per commit.

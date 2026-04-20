@@ -292,7 +292,7 @@ class ReasonerModule:
         batch = self.ready_reasoner_batches.pop(0)
         self.current_reasoner_group_images = batch
         self.base_images = [item["image"] for item in batch]
-        self.base_image_ids = list(range(1, len(batch) + 1))
+        self.base_image_ids = list(range(len(batch)))
         self.get_logger().info(
             f"activate reasoner batch group={batch[0]['group']}, "
             f"stage={batch[0].get('stage', 'object')}, size={len(batch)}"

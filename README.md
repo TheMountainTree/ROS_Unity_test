@@ -122,7 +122,7 @@ ros2 run eeg_processing ssvep_communication_node4_test --ros-args \
 
 # 9.3 Reasoner 多阶段推理节点 (object -> category -> activity)
 #     默认读取 ./picture 目录下的图片
-ros2 run publisher_test reasoner_publish_test_3_test
+ros2 run publisher_test reasoner_publish_test_2
 
 # 调试模式：跳过 EEG TCP 连接和 trigger 发送 (无真实设备时使用)
 ros2 run eeg_processing ssvep_communication_node4_test --ros-args \

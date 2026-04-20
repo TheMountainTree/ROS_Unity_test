@@ -14,7 +14,7 @@ FS = 1000
 NYQUIST = FS / 2
 
 # 预处理参数
-HIGHPASS_CUTOFF = 2.0   # Hz
+HIGHPASS_CUTOFF = 6.0   # Hz
 NOTCH_FREQS = [50.0, 100.0]
 NOTCH_Q = 35.0
 
@@ -74,7 +74,7 @@ def find_harmonics(freq_hz, max_freq=NYQUIST, n_max=5):
 
 
 def main():
-    data_path = "data/central_controller_ssvep_node4_test/ssvep4_pretrain_dataset_20260414_161545.npy"
+    data_path = "data/central_controller_ssvep_node4_test/ssvep4_pretrain_dataset_20260416_164519.npy"
     d = np.load(data_path, allow_pickle=True).item()
     x_raw = d["x"]
     y = d["y"]

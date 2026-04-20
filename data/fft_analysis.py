@@ -49,7 +49,7 @@ class PeakDetectConfig:
 class FFTAnalysisConfig:
     npy_path: str = (
         "data/central_controller_ssvep_node4_test/"
-        "ssvep4_pretrain_dataset_20260414_161545.npy"
+        "ssvep4_pretrain_dataset_20260416_151536.npy"
     )
     fs: float = 256.0
 
@@ -71,12 +71,12 @@ class FFTAnalysisConfig:
 CONFIG = FFTAnalysisConfig(
     trial_count_per_label=5,
     trial_indices_per_label=None,
-    exclude_channels=["PO4", "O2", "Oz", "P4"],
+    exclude_channels=["PO4", "O2", "P4"],
     preprocess=PreprocessConfig(
         enabled=True,
         highpass_cutoff_hz=6.0,
         highpass_order=4,
-        notch_freqs_hz=[50.0, 100.0, 12.78, 12.79, 38.38, 38.36, 25.60, 25.57],
+        notch_freqs_hz=[50.0, 100.0],
         notch_q=35.0,
         target_fs=256.0,
     ),

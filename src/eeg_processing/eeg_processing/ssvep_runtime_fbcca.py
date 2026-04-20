@@ -46,7 +46,11 @@ class SSVEPFBCCARuntime:
         frequencies: Sequence[float],
         logger=None,
     ) -> None:
-        if generate_filterbank is None or FBSCCA is None or generate_cca_references is None:
+        if (
+            generate_filterbank is None
+            or FBSCCA is None
+            or generate_cca_references is None
+        ):
             raise RuntimeError(
                 "metabci.brainda is required for FBCCA runtime decoding but is not available"
             )
@@ -71,7 +75,7 @@ class SSVEPFBCCARuntime:
         self._estimator: Optional[FBSCCA] = None
         self._estimator_n_channels: int = -1
         self._estimator_n_samples: int = -1
-        self._last_bad_channels: List[int] = []
+        self._manual_drop_indices: List[int] = self._resolve_manual_drop_indices()
 
     def preprocess_epoch(self, epoch: np.ndarray, input_fs: float) -> np.ndarray:
         """Apply 1_2-style preprocessing, then resample to target_srate.
@@ -79,12 +83,14 @@ class SSVEPFBCCARuntime:
         Steps:
         1. Demean (per channel)
         2. Detrend (linear)
-        3. High-pass 2Hz
+        3. Band-pass
         4. Notch 50/100Hz
         5. Resample to target_srate
         """
         if epoch.ndim != 2:
-            raise ValueError(f"epoch must be 2D (n_channels, n_samples), got shape={epoch.shape}")
+            raise ValueError(
+                f"epoch must be 2D (n_channels, n_samples), got shape={epoch.shape}"
+            )
         if input_fs <= 0.0:
             raise ValueError(f"input_fs must be > 0, got {input_fs}")
 
@@ -96,24 +102,27 @@ class SSVEPFBCCARuntime:
         # 2) Detrend
         out = signal.detrend(out, axis=1)
 
-        # 3) High-pass
+        # 3) Band-pass
         nyquist = 0.5 * float(input_fs)
-        hp_cutoff = max(0.1, float(self.cfg.highpass_cutoff_hz))
-        if hp_cutoff < nyquist:
-            sos_hp = signal.butter(
-                int(self.cfg.highpass_order),
-                hp_cutoff,
-                btype="highpass",
+        bp_low = max(0.1, float(self.cfg.bandpass_low_hz))
+        bp_high = min(float(self.cfg.bandpass_high_hz), nyquist - 0.1)
+        if bp_low < bp_high:
+            sos_bp = signal.butter(
+                int(self.cfg.bandpass_order),
+                [bp_low, bp_high],
+                btype="bandpass",
                 fs=float(input_fs),
                 output="sos",
             )
-            out = signal.sosfiltfilt(sos_hp, out, axis=1)
+            out = signal.sosfiltfilt(sos_bp, out, axis=1)
 
         # 4) Notch
         for f0 in self.cfg.notch_freqs_hz:
             f0 = float(f0)
             if 0.0 < f0 < nyquist:
-                b, a = signal.iirnotch(w0=f0, Q=float(self.cfg.notch_q), fs=float(input_fs))
+                b, a = signal.iirnotch(
+                    w0=f0, Q=float(self.cfg.notch_q), fs=float(input_fs)
+                )
                 out = signal.filtfilt(b, a, out, axis=1)
 
         # 5) Resample
@@ -134,8 +143,11 @@ class SSVEPFBCCARuntime:
 
         Returns -1 when decoding fails or predicts an inactive image slot.
         """
-        preprocessed = self.preprocess_epoch(epoch, input_fs)
-        preprocessed = self._apply_bad_channel_strategy(preprocessed)
+        # 1) Manual bad-channel exclusion first (on raw epoch)
+        epoch_cleaned = self._apply_manual_channel_exclusion(epoch)
+
+        # 2) Preprocess after channel exclusion
+        preprocessed = self.preprocess_epoch(epoch_cleaned, input_fs)
         n_channels, n_samples = preprocessed.shape
         if n_samples < 16:
             self._log_warn(f"epoch too short after preprocess: samples={n_samples}")
@@ -163,11 +175,17 @@ class SSVEPFBCCARuntime:
                 self._log_warn(f"FBCCA decode failed: {exc}")
                 return -1
 
-        # Some implementations return class indices (0..N-1), others return labels.
-        if 1 <= pred_raw <= len(self.frequencies):
-            predicted_label = pred_raw
-        elif 0 <= pred_raw < len(self.frequencies):
+        # MetaBCI FBSCCA in this project/runtime returns 0-based class indices.
+        # Map index -> label(1..N) first. Keep a guarded fallback for 1-based output.
+        if 0 <= pred_raw < len(self.frequencies):
             predicted_label = pred_raw + 1
+        elif pred_raw == len(self.frequencies):
+            # Fallback path for rare 1-based outputs from other variants.
+            predicted_label = pred_raw
+            self._log_warn(
+                "FBCCA returned 1-based style class value; "
+                "runtime expects 0-based index output."
+            )
         else:
             self._log_warn(f"invalid FBCCA prediction value: {pred_raw}")
             return -1
@@ -183,55 +201,63 @@ class SSVEPFBCCARuntime:
 
         return predicted_label
 
-    def _apply_bad_channel_strategy(self, epoch: np.ndarray) -> np.ndarray:
-        """Detect bad channels and apply configured mitigation strategy."""
-        self._last_bad_channels = []
-        if not bool(self.cfg.bad_channel_suppress_enabled):
-            return epoch
+    def _resolve_manual_drop_indices(self) -> List[int]:
+        """Map configured channel names to indices for manual exclusion."""
+        channel_order = list(getattr(self.cfg, "channel_name_order", []) or [])
+        bad_names = [
+            str(v).strip() for v in (getattr(self.cfg, "manual_bad_channels", []) or [])
+        ]
+        bad_names = [v for v in bad_names if v]
+        if not bad_names or not channel_order:
+            return []
+
+        name_to_idx = {name.upper(): idx for idx, name in enumerate(channel_order)}
+        drop_idx: List[int] = []
+        unknown: List[str] = []
+        for name in bad_names:
+            idx = name_to_idx.get(name.upper())
+            if idx is None:
+                unknown.append(name)
+                continue
+            drop_idx.append(int(idx))
+
+        if unknown:
+            self._log_warn(
+                f"manual_bad_channels contains unknown names {unknown}; "
+                f"channel_name_order={channel_order}"
+            )
+
+        unique_idx = sorted(set(drop_idx))
+        if unique_idx:
+            self._log_info(
+                f"FBCCA manual channel exclusion enabled: names={bad_names}, indices={unique_idx}"
+            )
+        return unique_idx
+
+    def _apply_manual_channel_exclusion(self, epoch: np.ndarray) -> np.ndarray:
+        """Apply manual channel exclusion from configured channel names."""
         if epoch.ndim != 2 or epoch.shape[0] <= 1:
             return epoch
-
-        data = epoch.astype(np.float64, copy=True)
-        data -= np.median(data, axis=1, keepdims=True)
-        mad = np.median(np.abs(data), axis=1)
-        scale = 1.4826 * mad
-        valid = scale > 1e-12
-        global_scale = float(np.median(scale[valid])) if np.any(valid) else 1.0
-        if global_scale <= 0.0:
+        if not self._manual_drop_indices:
             return epoch
 
-        low = float(self.cfg.bad_channel_low_ratio)
-        high = float(self.cfg.bad_channel_high_ratio)
-        bad_mask = (scale < global_scale * low) | (scale > global_scale * high)
-        bad_idx = np.where(bad_mask)[0].astype(int).tolist()
-        self._last_bad_channels = bad_idx
-        if not bad_idx:
+        valid_drop = [
+            idx for idx in self._manual_drop_indices if 0 <= idx < epoch.shape[0]
+        ]
+        if not valid_drop:
             return epoch
 
-        mode = str(getattr(self.cfg, "bad_channel_mode", "drop")).strip().lower()
-        if mode in ("drop", "remove", "exclude"):
-            keep_idx = [i for i in range(epoch.shape[0]) if i not in set(bad_idx)]
-            min_channels = max(2, int(getattr(self.cfg, "bad_channel_min_channels", 4)))
-            if len(keep_idx) >= min_channels:
-                self._log_warn(
-                    f"FBCCA bad-channel drop: bad={bad_idx}, keep={keep_idx}, "
-                    f"global_scale={global_scale:.6g}"
-                )
-                return epoch[np.asarray(keep_idx, dtype=np.int32), :].astype(np.float32, copy=False)
+        keep_idx = [i for i in range(epoch.shape[0]) if i not in set(valid_drop)]
+        if len(keep_idx) < 2:
             self._log_warn(
-                f"FBCCA bad-channel drop skipped: bad={bad_idx}, keep={len(keep_idx)} < "
-                f"min_channels={min_channels}"
+                f"manual channel exclusion skipped: keep={len(keep_idx)} < 2, "
+                f"drop_indices={valid_drop}"
             )
             return epoch
 
-        factor = float(self.cfg.bad_channel_suppress_factor)
-        factor = min(1.0, max(0.0, factor))
-        data[bad_mask, :] *= factor
-        self._log_warn(
-            f"FBCCA bad-channel suppression: bad={bad_idx}, "
-            f"global_scale={global_scale:.6g}, factor={factor:.3f}"
+        return epoch[np.asarray(keep_idx, dtype=np.int32), :].astype(
+            np.float32, copy=False
         )
-        return data.astype(np.float32, copy=False)
 
     def _ensure_estimator(self, n_channels: int, n_samples: int) -> None:
         if (
@@ -289,7 +315,9 @@ class SSVEPFBCCARuntime:
                     n_harmonics=n_harmonics,
                 )
         except Exception as exc:
-            self._log_warn(f"generate_cca_references failed ({exc}), fallback to manual refs")
+            self._log_warn(
+                f"generate_cca_references failed ({exc}), fallback to manual refs"
+            )
             y_ref = self._generate_reference_signals(n_samples)
 
         # Align exact sample length to decoder epoch length.

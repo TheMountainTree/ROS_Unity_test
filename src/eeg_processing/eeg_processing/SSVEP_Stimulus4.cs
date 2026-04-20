@@ -13,7 +13,7 @@ using System.Text;
 
 /// <summary>
 /// Unity 侧统一 SSVEP 显示器（解码 + 预训练）。
-/// - 解码模式：接收 ROS 图像批次，按 ROS 指令开始闪烁并回传 trial_started。
+/// - 解码模式：接收 ROS 图像批次，按 ROS 指令开始闪烁。
 /// - 预训练模式：接收 ROS 的提示/刺激/休息指令，仅负责显示并回传 trial_start UDP。
 ///
 /// 重要说明：
@@ -352,9 +352,9 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
 
         int requiredCount = batchStartedByCommand ? expectedBatchImageCount : 6;
         if (
-            imgIdx < 1
-            || imgIdx > 6
-            || imgIdx > requiredCount
+            imgIdx < 0
+            || imgIdx >= 6
+            || imgIdx >= requiredCount
             || receivedImgIndices.Contains(imgIdx)
         )
         {
@@ -362,7 +362,7 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
         }
 
         Texture2D tex = BgrToTexture(data, width, height);
-        receivedTextures[imgIdx - 1] = tex;
+        receivedTextures[imgIdx] = tex;
         receivedImgIndices.Add(imgIdx);
 
         if (!isBatchCompleted && receivedImgIndices.Count >= requiredCount)
@@ -447,7 +447,6 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
 
         decodeStimStarted = true;
         SendDecodeMarker(100 + Mathf.Max(1, currentTargetId));
-        SendDecodeTrialStarted();
     }
 
     // --------------------------------------
@@ -832,10 +831,10 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
             if (key == "trial") int.TryParse(val, out trialId);
             else if (key == "img") int.TryParse(val, out imgIdx);
             else if (key == "target") int.TryParse(val, out targetId);
-            else if (key == "image_id") int.TryParse(val, out targetId);
         }
 
-        return trialId > 0 && imgIdx > 0 && targetId > 0;
+        // Decode image metadata now uses 0-based image index (img=0..5).
+        return trialId > 0 && imgIdx >= 0 && imgIdx < 6 && targetId > 0;
     }
 
     bool TryParseCommand(
@@ -943,21 +942,6 @@ public class ROS2SSVEPStimulator2 : MonoBehaviour
         catch (Exception e)
         {
             Debug.LogWarning("Send decode marker failed: " + e.Message);
-        }
-    }
-
-    void SendDecodeTrialStarted()
-    {
-        if (udpSender == null || currentTrialId <= 0) return;
-        try
-        {
-            string ack = $"trial_started={currentTrialId}";
-            byte[] payload = Encoding.UTF8.GetBytes(ack);
-            udpSender.Send(payload, payload.Length, decodeAckTargetIP, decodeAckPort);
-        }
-        catch (Exception e)
-        {
-            Debug.LogWarning("Send decode trial_started failed: " + e.Message);
         }
     }
 

@@ -2,12 +2,14 @@
 """SSVEP Communication Node4_test - With Runtime FBCCA EEG Decoding.
 
 This node extends Node3_1 with integrated FBCCA decoding for real-time
-EEG-based selection, replacing the mock_selected_index parameter approach.
+EEG-based selection, while keeping mock_selected_index fallback for bypass
+debugging.
 
 Key features:
 - Runtime FBCCA decoding during decode mode
 - Unified preprocessing + decoding component interface
 - Pretrain mode as EEG data recording only
+- Decode chain slot/image indices use 0-based conventions
 
 Usage:
   # Pretrain mode (collect EEG data only)
@@ -103,9 +105,14 @@ class CentralControllerSSVEPNode4Test(DecodeModule, PretrainModule, ReasonerModu
             f"eeg_bypass_debug={self.eeg_bypass_debug}"
         )
         self.get_logger().info(
+            "Node4_test decode index convention: "
+            "ui_slot=0-based(0..7), image_index=0-based(0..5), reasoner index=0-based"
+        )
+        self.get_logger().info(
             "Node4_test FBCCA runtime integration: "
             f"target_srate={self.fbcca_runtime_config.target_srate}, "
-            f"highpass={self.fbcca_runtime_config.highpass_cutoff_hz}Hz, "
+            f"bandpass={self.fbcca_runtime_config.bandpass_low_hz}-"
+            f"{self.fbcca_runtime_config.bandpass_high_hz}Hz, "
             f"notch={self.fbcca_runtime_config.notch_freqs_hz}"
         )
         self.get_logger().info(
@@ -220,8 +227,6 @@ class CentralControllerSSVEPNode4Test(DecodeModule, PretrainModule, ReasonerModu
         self.history_udp_target_ip = self.reasoner_config.history_udp_ip
         self.history_udp_target_port = self.reasoner_config.history_udp_port
 
-        self.decode_start_bind_ip = cfg.unity.host_ip
-        self.decode_start_port = cfg.unity.decode_start_port
         self.train_trigger_bind_ip = cfg.unity.host_ip
         self.train_trigger_bind_port = cfg.unity.pretrain_start_port
         self.trigger_local_ip = cfg.trigger_forward.local_ip
@@ -272,11 +277,6 @@ class CentralControllerSSVEPNode4Test(DecodeModule, PretrainModule, ReasonerModu
         self.dataset_y = []
         self.dataset_saved = False
 
-    def _init_decode_ack_receiver(self) -> None:
-        self.decode_start_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.decode_start_sock.bind((self.decode_start_bind_ip, self.decode_start_port))
-        self.decode_start_sock.setblocking(False)
-
     def _init_pretrain_ack_receiver(self) -> None:
         self.pretrain_trigger_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.pretrain_trigger_sock.bind((self.train_trigger_bind_ip, self.train_trigger_bind_port))
@@ -314,7 +314,6 @@ class CentralControllerSSVEPNode4Test(DecodeModule, PretrainModule, ReasonerModu
         self._save_mode_dataset()
 
         for sock_name in [
-            "decode_start_sock",
             "pretrain_trigger_sock",
             "trigger_send_sock",
             "eeg_tcp_sock",

@@ -59,7 +59,8 @@ class UnityCommConfig:
 
     Attributes:
         host_ip: 本端绑定 IP（"0.0.0.0" 表示绑定所有网卡）。
-        decode_start_port: Decode 模式下接收 Unity "开始" 信号的 UDP 端口。
+        decode_start_port: 旧版 decode 握手 UDP 端口。Node4_test 当前解码流程
+            不再等待 Unity trial_started 回执，保留字段仅为兼容旧配置。
         pretrain_start_port: Pretrain 模式下接收 Unity "开始/触发" 信号的 UDP 端口。
         image_topic: 向 Unity 发布分割图像的 ROS 话题名。
         decode_command_topic: 向 Unity 发布解码命令（如 batch_start/batch_end、
@@ -133,8 +134,10 @@ class DecodeConfig:
         pre_stim_hold_s: 刺激呈现前的准备等待时间（秒），用于让受试者注视目标。
         num_images: 单次试次中发布给 Unity 的图片数量（最多 6 张，对应 UI 图片
             插槽 0/1/2/4/5/6；插槽 3 为 confirm，插槽 7 为 undo/rollback）。
+            Node4_test 解码元数据约定 `img/index/image_id/slot` 全部使用 0-based。
         max_trials: 单次 decode 会话的最大试次数，0 表示无限循环。
-        start_wait_timeout_s: 等待 Unity 发送 "decode 开始" 信号的超时时间（秒）。
+        start_wait_timeout_s: 旧版 decode 握手超时（秒）。Node4_test 当前解码流程
+            不再使用该等待逻辑，保留字段仅为兼容旧配置。
         capture_wait_timeout_s: 刺激结束后等待 EEG 数据就绪的额外缓冲时间（秒）。
         image_height: 发布图像的高度像素数。
         image_width: 发布图像的宽度像素数。
@@ -219,21 +222,22 @@ class FBCCARuntimeConfig:
     """运行时 FBCCA 解码与预处理配置。
 
     本 dataclass 定义了 ssvep_runtime_fbcca.SSVEPFBCCARuntime 所需的全部参数，
-    包括预处理链（去均值→去趋势→高通→陷波→降采样）、FBCCA 滤波器组设计参数
-    以及逐 epoch 坏导检测策略。
+    包括预处理链（去均值→去趋势→带通→陷波→降采样）、FBCCA 滤波器组设计参数
+    以及手动坏导通道剔除策略。
 
     预处理流水线（在 ssvep_runtime_fbcca.preprocess_epoch 中执行）:
       1. Demean（逐通道去均值）
       2. Detrend（线性去趋势）
-      3. High-pass（Butterworth 高通滤波，截止频率由 highpass_cutoff_hz 决定）
+      3. Band-pass（Butterworth 带通滤波，频带由 bandpass_low_hz/bandpass_high_hz 决定）
       4. Notch（IIR 陷波滤波，抑制工频及谐波）
       5. Resample（降采样至 target_srate）
 
     Attributes:
         target_srate: FBCCA 解码目标采样率（Hz）。原始 EEG 数据将在预处理后
             降采样到此频率。
-        highpass_cutoff_hz: 预处理高通滤波器截止频率（Hz）。
-        highpass_order: 预处理高通滤波器阶数。
+        bandpass_low_hz: 预处理带通滤波器低截止频率（Hz）。
+        bandpass_high_hz: 预处理带通滤波器高截止频率（Hz）。
+        bandpass_order: 预处理带通滤波器阶数。
         notch_freqs_hz: 陷波滤波器目标频率列表（Hz），默认抑制 50Hz 工频及其
             100Hz 二次谐波。
         notch_q: 陷波滤波器品质因数 Q 值，越大陷波带宽越窄。
@@ -247,41 +251,33 @@ class FBCCARuntimeConfig:
         n_harmonics: CCA 参考信号中使用的谐波数量（含基频）。
         n_components: FBCCA 每个子带保留的 CCA 成分数。
         n_jobs: FBCCA fit/predict 并行度（1 为单线程）。
-        bad_channel_suppress_enabled: 是否启用逐 epoch 坏导检测与处理。
-        bad_channel_mode: 坏导处理策略。"drop" 表示剔除检测到的坏导通道，
-            "suppress" 表示按 suppress_factor 缩放坏导通道数据。
-        bad_channel_min_channels: drop 模式下保留的最少通道数；若剔除后剩余
-            通道数少于此值，则放弃剔除。
-        bad_channel_low_ratio: 坏导检测低阈值比率。通道 MAD 缩放因子低于
-            全局中位数的此倍数时判定为低信号坏导。
-        bad_channel_high_ratio: 坏导检测高阈值比率。通道 MAD 缩放因子高于
-            全局中位数的此倍数时判定为高信号坏导。
-        bad_channel_suppress_factor: suppress 模式下坏导数据的缩放因子
-            （0.0~1.0），0.01 近似静音。
+        channel_name_order: 原始 EEG 通道顺序（固定 8 通道），用于将
+            manual_bad_channels 中的名称映射到通道索引。
+        manual_bad_channels: 手动坏导名称列表（例如 ["O2", "Oz"]）。
+            runtime 将按名称匹配并在解码前剔除这些通道。
     """
 
     target_srate: int = 256
-    highpass_cutoff_hz: float = 6.0
-    highpass_order: int = 4
+    bandpass_low_hz: float = 6.0
+    bandpass_high_hz: float = 100.0
+    bandpass_order: int = 4
     notch_freqs_hz: List[float] = field(default_factory=lambda: [50.0, 100.0])
     notch_q: float = 35.0
     wp: List[Tuple[float, float]] = field(
-        default_factory=lambda: [(6, 90), (14, 90), (22, 90), (30, 90), (38, 90)]
+        default_factory=lambda: [(6.0, 50.0), (14.0, 50.0), (22.0, 50.0)]
     )
     ws: List[Tuple[float, float]] = field(
-        default_factory=lambda: [(4, 92), (12, 92), (20, 92), (28, 92), (36, 92)]
+        default_factory=lambda: [(4.0, 52.0), (12.0, 52.0), (20.0, 52.0)]
     )
     filter_order: int = 4
     rp: float = 0.5
-    n_harmonics: int = 2
+    n_harmonics: int = 4
     n_components: int = 1
     n_jobs: int = 1
-    bad_channel_suppress_enabled: bool = True
-    bad_channel_mode: str = "drop"
-    bad_channel_min_channels: int = 4
-    bad_channel_low_ratio: float = 0.2
-    bad_channel_high_ratio: float = 10.0
-    bad_channel_suppress_factor: float = 0.01
+    channel_name_order: List[str] = field(
+        default_factory=lambda: ["O1", "O2", "Oz", "PO3", "PO4", "Pz", "P3", "P4"]
+    )
+    manual_bad_channels: List[str] = field(default_factory=lambda: [])
 
 
 @dataclass

@@ -18,15 +18,15 @@ from ssvep_pipeline_fbcca import SSVEPPretrainerFBCCA, SSVEPDecoderFBCCA
 FREQS = [8.684, 9.706, 11.0, 11.786, 12.692, 13.75, 15.0, 18.333]
 LABEL2FREQ = {i + 1: f for i, f in enumerate(FREQS)}
 ALL_CHANNELS = ["O1", "O2", "Oz", "PO3", "PO4", "Pz", "P3", "P4"]
-BAD_CHANNELS = ["O2", "Oz", "PO4"]  # 手动坏道剔除，根据1_3分析结果
+BAD_CHANNELS = ["O2", "P4", "PO4"]  # 手动坏道剔除，根据1_3分析结果
 FS_ORIG = 1000
 FS_TARGET = 256
 
 # 预处理参数
 BANDPASS_LOW = 6.0
-BANDPASS_HIGH = 48.0
+BANDPASS_HIGH = 100.0 #48.0
 BANDPASS_ORDER = 4
-NOTCH_FREQS = [50.0, 100.0, 12.78, 12.79, 38.38, 38.36, 25.60, 25.57]
+NOTCH_FREQS = [50.0, 100.0]
 NOTCH_Q = 35.0
 
 # FBCCA 参数
@@ -36,7 +36,7 @@ FBCCA_WS = [(4.0, 52.0), (12.0, 52.0), (20.0, 52.0)]
 FBCCA_FILTER_ORDER = 4
 FBCCA_RP = 0.5
 FBCCA_N_COMPONENTS = 1
-FBCCA_N_HARMONICS_GRID = [1, 2, 3]
+FBCCA_N_HARMONICS_GRID = [1, 2, 3, 4, 5]
 
 
 def detect_bad_channels(x_raw, y):
@@ -128,7 +128,7 @@ def resample_epoch(epoch, target_fs=FS_TARGET):
 
 def prepare_data():
     """加载数据，手动坏道剔除，预处理，返回 X, y, good_channels。"""
-    data_path = "data/central_controller_ssvep_node4_test/ssvep4_pretrain_dataset_20260414_161545.npy"
+    data_path = "data/central_controller_ssvep_node4_test/ssvep4_pretrain_dataset_20260416_164519.npy"
     d = np.load(data_path, allow_pickle=True).item()
     x_raw = d["x"]
     y = d["y"]

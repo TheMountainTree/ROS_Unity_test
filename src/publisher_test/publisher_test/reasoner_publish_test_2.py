@@ -50,6 +50,7 @@ CATEGORY_WORDS = [
     "organize",
     "dispose",
 ]
+# 0-based UI slot -> 0-based page-local item index.
 SLOT_TO_ITEM_INDEX = {0: 0, 1: 1, 2: 2, 4: 3, 5: 4, 6: 5}
 VALID_SELECTION_SLOTS = set(SLOT_TO_ITEM_INDEX.keys())
 
@@ -443,6 +444,7 @@ class ReasonerPublishTest2Node(Node):
         )
 
         for index, item in enumerate(page_items):
+            # `index` is explicitly 0-based for Node4_test/Unity decode image routing.
             frame_id = (
                 f"source=reasoner;group={group_id};index={index};"
                 f"image_path={os.path.basename(str(item.get('path', '')))};"
