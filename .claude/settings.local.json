@@ -9,7 +9,9 @@
       "Bash(python3 data/Data_Analysis/1_2.py)",
       "Bash(python3 data/Data_Analysis/1_3.py)",
       "Bash(python3 data/Data_Analysis/1_2_preprocess.py)",
-      "Bash(python3 data/Data_Analysis/1_3_preprocess.py)"
+      "Bash(python3 data/Data_Analysis/1_3_preprocess.py)",
+      "Bash(python3 1_5_etrca.py)",
+      "Bash(python3 *)"
     ]
   }
 }

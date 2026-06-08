@@ -30,10 +30,10 @@ except Exception:
 PREFERRED_CAMERA = "camera2"  # Switch to "camera1" if needed.
 
 # LLM compatibility config (fill with your own endpoint/credentials).
-OPENAI_BASE_URL = "https://api.siliconflow.cn/v1" # "https://cloud.infini-ai.com/maas/coding/v1"
-OPENAI_API_KEY = "sk-gzzgcanfgcdwxlnwfwrcmtjkwyvuqflwxnwspwxycxrksuyh" # "sk-cp-7udwseww3rks2yfx"
-OPENAI_MODEL = "Pro/moonshotai/Kimi-K2.5" # "kimi-k2.5"
-OPENAI_PROXY_URL = "socks5://127.0.0.1:7897"
+OPENAI_BASE_URL = "https://api.deepseek.com" # "https://cloud.infini-ai.com/maas/coding/v1" # https://opencode.ai/zen/go/v1
+OPENAI_API_KEY = "sk-9e58144b173e40aaab19442964294695" # "sk-cp-7udwseww3rks2yfx" # sk-h1OG1WLQnuBNncKViq1mplND12tjhCkGTjFCvo75JJ5x2OpWeA6mfGKlix0UrJMc
+OPENAI_MODEL = "deepseek-v4-flash" # "kimi-k2.5" # kimi-k2.5
+OPENAI_PROXY_URL = None  # Set to "socks5://127.0.0.1:7897" if proxy needed
 OPENAI_TIMEOUT_S = 60.0
 
 MAX_BATCH_SIZE = 6

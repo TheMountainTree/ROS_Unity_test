@@ -1,90 +1,112 @@
 # Repository Guidelines
+
 ## Self-update rule
 After major code changes, update this AGENTS.md to reflect:
 - architecture
 - conventions
 - dependencies
-## Project Structure & Module Organization
-This repository is a ROS2 workspace for Unity-integrated BCI workflows.
-- `src/eeg_processing/`: core EEG/BCI logic (P300 + SSVEP controllers, decoding pipeline, model assets).
-- `src/eeg_processing/eeg_processing/utils.py`: shared SSVEP utility module for thread-safe EEG ring buffers, enum-based node states, and per-trial state dataclasses.
-- `src/eeg_processing/eeg_processing/ssvep_communication_node2_config.py`: static config module for `SSVEP_Communication_Node2.py`; edit defaults here instead of expanding ROS parameter declarations.
-- `src/eeg_processing/eeg_processing/SSVEP_Communication_Node2.py`: refactored SSVEP communication node that keeps decode/pretrain behavior, reads most defaults from the config module, and only exposes a small runtime override surface through ROS parameters.
-- `src/eeg_processing/eeg_processing/SSVEP_Communication_Node3.py`: modular SSVEP communication node; keep only node wiring (parameters, pub/sub, timer dispatch, lifecycle cleanup) in this file.
-- `src/eeg_processing/eeg_processing/SSVEP_Communication_Node3_1.py`: Node3 v1 variant wiring entry; uses `_1` companion modules and adds decode debug decoupling toggle.
-- `src/eeg_processing/eeg_processing/SSVEP_Communication_Node4_test.py`: Node4_test wiring entry for runtime FBCCA decoding + reasoner flow; keep mode wiring here and put behavior in `_2_test` modules.
-- `src/eeg_processing/eeg_processing/pretrain_2_test.py`: Node4_test pretrain/shared EEG module; pretrain stage is data-recording only (no model training), keeps EEG/trigger capture and dataset persistence.
-- `src/eeg_processing/eeg_processing/decode_2_test.py`: Node4_test decode module; uses runtime FBCCA via a unified preprocess/decode interface and keeps UI 8-slot mapping alignment for reasoner selection.
-- `src/eeg_processing/eeg_processing/ssvep_runtime_fbcca.py`: Node4_test runtime algorithm component; centralizes preprocessing (demean/detrend/bandpass/notch + resample) and FBCCA decode APIs (`preprocess_epoch`, `decode_epoch`) for controller reuse.
-- `src/eeg_processing/eeg_processing/metabci_stim.py`: MetaBCI demo-derived stimulus entry; keeps official multi-paradigm layout and adds Node4-style EEG+label recording for the standard SSVEP paradigm.
-- `src/eeg_processing/eeg_processing/decode.py`: decode-mode module for trial preparation, image publication, decode command publishing, and decode state transitions.
-- `src/eeg_processing/eeg_processing/decode_1.py`: Node3_1 decode module; publishes explicit decode batch envelope commands (`batch_start`/`batch_end`) around `count<=6` image packets.
-- `src/eeg_processing/eeg_processing/pretrain.py`: pretrain-mode module plus shared EEG TCP/trigger/epoch capture and dataset persistence logic used by decode/pretrain.
-- `src/eeg_processing/eeg_processing/pretrain_1.py`: Node3_1 shared EEG module; supports full EEG/trigger bypass debug mode while keeping decode/pretrain state flow runnable.
-- `src/eeg_processing/eeg_processing/reasoner.py`: reasoner handshake, grouped image intake, history publishing, and selection/rollback command flow.
-- `src/eeg_processing/eeg_processing/reasoner_1.py`: Node3_1 reasoner module copy paired with `_1` decode/pretrain modules; keeps staged action stack for slot-7 undo (`confirm` -> `rollback`, `selection` -> `undo_selection`).
-- `src/eeg_processing/eeg_processing/ssvep_communication_node3_config.py`: static defaults for Node3 (general/unity/trigger/eeg/decode/pretrain/reasoner); keep runtime override surface minimal.
-- `src/eeg_processing/eeg_processing/LLMStreamManager.cs`: Unity-side LLM stream text panel subscriber; consumes JSON string events from `/llm_output_stream` and updates TMP UI on the Unity main thread.
-- `src/publisher_test/`: utility/test publishers, UDP trigger sender, TCP listener.
-- `src/publisher_test/publisher_test/reasoner_publish_test_1.py`: v1 reasoner test publisher with fixed 4-group sizes (6/5/4/3) and explicit `batch_start`/`batch_end` envelope commands.
-- `src/publisher_test/publisher_test/reasoner_publish_test_2.py`: multi-stage (A/B/C) reasoner publisher that scans `picture/`, fuses camera1/camera2 object crops with camera-priority dedup, sends paged batches (`<=6`) for object/category/activity, renders text candidates into images, and supports OpenAI-compatible activity generation with local fallback.
-- `src/ROS-TCP-Endpoint/`: Unity ROS TCP bridge package (`ros_tcp_endpoint`).
-- `data/`: recorded trials, mappings, and generated datasets/plots.
-- `dev_logs/`: development notes.
 
-Keep node code inside each package module (for example `src/eeg_processing/eeg_processing/*.py`) and package metadata in `package.xml`, `setup.py`, and `setup.cfg`.
+## Project Structure & Module Organization
+ROS2 (ament_python) workspace for Unity-integrated BCI workflows (SSVEP, P300).
+
+| Package | Purpose |
+|---|---|
+| `src/eeg_processing/` | Core EEG/BCI logic, controllers, FBCCA decoding. Entry points in `setup.py`. |
+| `src/publisher_test/` | Utility publishers, UDP trigger sender, TCP listener, reasoner test nodes. |
+| `src/ROS-TCP-Endpoint/` | Unity ROS TCP bridge (`ros_tcp_endpoint`). |
+| `src/AgenticReasoner/` | AI agent framework for ROS (no console_scripts registered). |
+| `src/EEG_Analysis/` | EEG analysis library (no console_scripts registered). |
+| `data/` | Recorded trials, mappings, generated datasets/plots. |
+| `dev_logs/` | Development notes. |
+
+Keep node code inside each package module and package metadata in `package.xml`, `setup.py`, `setup.cfg`.
+
+### Two Node4 variants (do not confuse)
+- `central_controller_ssvep_node4` (`CentralControllerSSVEPNode4.py`): original monolithic controller; README claims it auto-trains eTRCA models in pretrain mode.
+- `ssvep_communication_node4_test` (`SSVEP_Communication_Node4_test.py`): **modular FBCCA-only controller**. Pretrain is data-recording only (no model training); decode uses runtime FBCCA via `ssvep_runtime_fbcca.py`.
+
+### Module separation rules
+Do not move behavior logic back into main node files.
+- Node2: `SSVEP_Communication_Node2.py` + `ssvep_communication_node2_config.py`.
+- Node3: wiring only in `SSVEP_Communication_Node3.py`; behavior in `decode.py` / `pretrain.py` / `reasoner.py`.
+- Node3_1: wiring only in `SSVEP_Communication_Node3_1.py`; behavior in `decode_1.py` / `pretrain_1.py` / `reasoner_1.py`.
+- Node4_test: wiring only in `SSVEP_Communication_Node4_test.py`; behavior in `decode_2_test.py` / `pretrain_2_test.py` / `reasoner_2_test.py`.
+
+### Shared utilities
+- `eeg_processing/utils.py`: `CircularEEGBuffer`, `NodeState` enum, `TrialState`. Prefer these over redefining helpers.
+- `ssvep_communication_node4_test_config.py`: `FBCCARuntimeConfig` holds all filterbank/preprocessing defaults for Node4_test.
+
+### Stale / unregistered files
+- `reasoner_publish_test_3_test.py` exists in the tree but is **not registered in `publisher_test/setup.py`**. The active multi-stage reasoner entry points are `reasoner_publish_test_2` and `reasoner_publish_test_2_local_llm`.
 
 ## Build, Test, and Development Commands
 Run from workspace root:
-- `colcon build --symlink-install`: build all packages with editable install.
-- `colcon build --packages-select eeg_processing`: build one package.
-- `source install/setup.bash`: load built packages into shell.
-- `colcon test --packages-select eeg_processing publisher_test ros_tcp_endpoint`: run package tests.
-- `colcon test-result --verbose`: inspect failures.
-- `ros2 launch ros_tcp_endpoint endpoint.py`: start Unity TCP endpoint.
-- `ros2 run eeg_processing central_controller_ssvep_node2 --ros-args -p run_mode:=decode`: example runtime command.
+
+- `colcon build --symlink-install`
+- `colcon build --packages-select eeg_processing`
+- `source install/setup.bash`
+- `colcon test --packages-select eeg_processing ros_tcp_endpoint AgenticReasoner EEG_Analysis`
+- `colcon test-result --verbose`
+
+Focused verification:
+- `python -m py_compile src/eeg_processing/eeg_processing/<module>.py` (minimum pre-build check).
+- `python3 src/eeg_processing/eeg_processing/validate_ssvep3_npy.py`
+- `python3 src/eeg_processing/eeg_processing/validate_ssvep4_npy.py`
+
+Runtime examples:
+- `ros2 launch ros_tcp_endpoint endpoint.py`
+- `ros2 run ros_tcp_endpoint default_server_endpoint --ros-args -p ROS_IP:=0.0.0.0`
+- `ros2 run eeg_processing ssvep_communication_node4_test --ros-args -p run_mode:=decode -p reasoner_mode_enabled:=true`
+- `ros2 run publisher_test reasoner_publish_test_2`
+
+**Critical:** `eeg_bypass_debug:=true` completely disables EEG TCP reception and trigger sending. In decode mode this causes `_consume_reasoner_selection()` to always return -1, and the node never leaves `REASONER_WAIT_SELECTION` (effectively an infinite stall). Only use bypass in pretrain mode for UI/logic testing, or ensure `mock_selected_index` is set to a valid slot.
+
+### Image coordinate convention
+ROS/OpenCV origin is top-left (Y down). Unity origin is bottom-left (Y up). All images published to Unity must be vertically flipped (`np.flipud`). This convention is applied in every decode module.
 
 ## Coding Style & Naming Conventions
-- Python: follow PEP 8, 4-space indentation, and PEP 257 docstrings.
-- Lint gates are defined via `ament_flake8` and `ament_pep257`; keep code clean enough to pass both.
-- ROS node/module naming in this repo typically uses descriptive snake_case files with CamelCase class names (for example `CentralControllerSSVEPNode2.py`).
-- For new SSVEP controller work, prefer shared helpers from `eeg_processing/utils.py` over redefining buffer/state helpers inside each node file.
-- New controller state machines should use `NodeState` enums and trial reset helpers instead of ad hoc string literals and repeated field reinitialization.
-- For `SSVEP_Communication_Node2.py`, static defaults belong in `ssvep_communication_node2_config.py`; only high-frequency runtime toggles such as mode/reasoner/debug overrides should remain as ROS parameters.
-- For `SSVEP_Communication_Node3.py`, keep the same small ROS parameter surface (`run_mode`, `reasoner_mode_enabled`, `mock_selected_index`, `save_dir`, `image_dir`, `decode_max_trials`) and put all other defaults in `ssvep_communication_node3_config.py`.
-- For `SSVEP_Communication_Node3_1.py`, the runtime surface extends with `eeg_bypass_debug`; when enabled, `_1` modules bypass EEG TCP ingest and trigger UDP send for reasoner/Unity-only debugging.
-- For Node3 maintenance, prefer editing behavior in `decode.py` / `pretrain.py` / `reasoner.py` and avoid moving mode logic back into the main node file.
-- For Node3_1 maintenance, edit behavior in `decode_1.py` / `pretrain_1.py` / `reasoner_1.py`; keep only wiring in `SSVEP_Communication_Node3_1.py`.
-- For Node4_test maintenance, edit behavior in `decode_2_test.py` / `pretrain_2_test.py` / `reasoner_2_test.py`; keep only wiring/parameters in `SSVEP_Communication_Node4_test.py`.
-- For `metabci_stim.py`, keep SSVEP flashing/index/rest timing consistent with MetaBCI demo logic; only extend trial lifecycle with trigger(1/2)-aligned EEG epoch recording.
-- `metabci_stim.py` SSVEP recording outputs should follow Node4-style naming (`ssvep4_pretrain_trials_*`, `ssvep4_pretrain_metadata_*`, `ssvep4_pretrain_dataset_*`) to stay analysis-compatible.
-- Node4_test decode slot conventions use full UI slots `0..7`: image slots `0,1,2,4,5,6`, confirm `3`, undo/rollback `7`; decode label mapping must stay aligned with reasoner slot semantics.
-- Node4_test decode image metadata is 0-based end-to-end: `img=0..5`, `image_id=0..N-1`, reasoner frame `index=0..5`; Unity `SSVEP_Stimulus4.cs` should parse decode `img` as 0-based and write to `receivedTextures[img]` directly.
-- Node4_test is fixed to runtime FBCCA (no eTRCA model training/loading path); keep algorithm internals inside `ssvep_runtime_fbcca.py`, and keep controller files calling only unified runtime APIs.
-- Node4_test preprocessing convention at runtime is: demean -> detrend -> bandpass (default 6-100Hz) -> notch 50/100Hz at acquisition rate, then resample to decode target srate.
-- Node4_test decode/preprocess defaults are config-level (`FBCCARuntimeConfig` in `ssvep_communication_node4_test_config.py`); keep filterbank and preprocessing parameters in config rather than hardcoding in node logic.
-- Node4_test FBCCA runtime uses manual bad-channel exclusion via `FBCCARuntimeConfig.manual_bad_channels` with fixed-name mapping from `channel_name_order` (default 8-channel order: `O1,O2,Oz,PO3,PO4,Pz,P3,P4`); no per-epoch automatic bad-channel detection in runtime decode.
-- Node4_test decode start/stop timing is now ROS-driven like pretrain: ROS sends decode trigger `1/2` immediately before publishing Unity `stim/stop`, and Unity no longer sends `trial_started` UDP back to Node4_test.
-- Node4_test reasoner decode keeps two selection sources: normal mode uses runtime FBCCA on the captured epoch, while `eeg_bypass_debug=true` waits in `REASONER_WAIT_SELECTION` until `mock_selected_index` is set and consumed.
-- Node4_test pretrain completion should only save dataset/metadata CSV+NPY and must not auto-train or emit model sidecars.
-- Decode v1 batch protocol (Node3_1 -> Unity): publish `cmd=batch_start;trial=...;target=...;count=...` on `/ssvep_decode_cmd`, then image packets on `/image_seg`, then `cmd=batch_end;...`; Unity should flash only active dynamic slots implied by `count` (max 6).
-- Reasoner v1 test protocol (`reasoner_publish_test_1` -> Node3_1): each group is enclosed by `cmd=batch_start;group=...;count=...` and `cmd=batch_end;group=...;count=...` on `/reasoner/images`; image frames keep `group/index/image_path` metadata and can carry `count`/`end` for backward compatibility.
-- Reasoner v2 staged protocol (`reasoner_publish_test_2` -> Node3_1): image frame metadata extends with `stage/page/item_uid/item_label`; `cmd=confirm` means page-forward/stage-forward navigation (if no next page, it is ignored with log), `cmd=rollback` means page-backward navigation based on confirm history (cross-stage allowed) and clears selections only on the rollback target page, `cmd=undo_selection` means cancel a prior staged selection by `stage/page/item_uid` and republish that page, `cmd=reuse_page` means keep current page and restart decode `prepare` without re-publishing images (used by A-stage object selection), and only `cmd=done` closes the session.
-- Reasoner v2 LLM stream protocol (`reasoner_publish_test_2*` -> Node3_1 -> Unity): reasoner publishes JSON events on `/reasoner/llm_stream` using `std_msgs/String` (`type=reset|append|done|error`, `stage=activity`, optional `text`); Node3_1 forwards to `/llm_output_stream` for Unity display.
-- Node3_1 reasoner history conventions: `reasoner_1.py` appends/publishes history images for staged selections (`object/category/activity`) except immediate duplicate re-selections (same stage + same item_uid as stack top), which are skipped and directly restart decode `prepare`; slot `7` now undoes the latest action from an action stack (`confirm` -> publish `rollback`, `selection` -> remove matching history item + publish `undo_selection` + send history UDP `delete_last`).
-- `reasoner_publish_test_2` camera conflict policy is code-level (`PREFERRED_CAMERA`) rather than ROS parameters; default is `camera2` priority.
-- `reasoner_publish_test_2` LLM settings are code-level constants (`OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT_S`) and use OpenAI-compatible Chat Completions JSON; fallback activity candidates must remain available when LLM output is missing/invalid.
-- Console entry points should remain explicit and task-oriented (see each package `setup.py`).
+- Python: PEP 8, 4-space indentation, PEP 257 docstrings.
+- Lint gates: `ament_flake8` and `ament_pep257` (see each package `test/`).
+- ROS nodes: descriptive `snake_case` files, `CamelCase` classes.
+- Static defaults belong in the corresponding `ssvep_communication_node*_config.py`. Only high-frequency runtime toggles should be ROS parameters: `run_mode`, `reasoner_mode_enabled`, `mock_selected_index`, `save_dir`, `image_dir`, `decode_max_trials`, `eeg_bypass_debug`.
+
+## Protocol & Slot Conventions
+
+### Node4_test slots and indexing
+- Full UI slots `0..7`: image slots `0,1,2,4,5,6`, confirm `3`, undo/rollback `7`.
+- Decode image metadata is 0-based end-to-end: `img=0..5`, `image_id=0..N-1`, reasoner frame `index=0..5`.
+- Preprocessing chain: demean -> detrend -> bandpass (default 6-100Hz) -> notch 50/100Hz at acquisition rate, then resample to decode target srate (default 256Hz).
+- Manual bad-channel exclusion via `FBCCARuntimeConfig.manual_bad_channels` with fixed-name mapping from `channel_name_order` (default 8-channel: `O1,O2,Oz,PO3,PO4,Pz,P3,P4`). No per-epoch automatic bad-channel detection.
+- Decode timing is ROS-driven: ROS sends decode trigger `1/2` immediately before publishing Unity `stim/stop`; Unity no longer sends `trial_started` UDP back.
+- Pretrain completion saves dataset/metadata CSV+NPY only; must not auto-train or emit model sidecars.
+- Node4_test connects to the EEG TCP server directly (IP `192.168.56.3:8712` by default), **not** via `eeg_tcp_listener_node`. The `eeg_tcp_listener_node` is a standalone utility for raw EEG streaming. Dependencies include `numpy`, `scipy`, `PIL`, and `metabci` (for FBCCA/SCCA algorithms).
+
+### Decode v1 batch protocol (Node3_1 -> Unity)
+Publish `cmd=batch_start;trial=...;target=...;count=...` on `/ssvep_decode_cmd`, then image packets on `/image_seg`, then `cmd=batch_end;...`. Unity flashes only active dynamic slots implied by `count` (max 6).
+
+### Reasoner v2 staged protocol (`reasoner_publish_test_2` -> Node3_1 / Node4_test)
+- Image frame metadata carries `stage/page/item_uid/item_label`.
+- Commands:
+  - `confirm`: page/stage forward navigation (ignored if no next page).
+  - `rollback`: page backward based on confirm history (cross-stage allowed), clears selections only on the rollback target page.
+  - `undo_selection`: cancel a prior staged selection by `stage/page/item_uid` and republish that page.
+  - `reuse_page`: keep current page, restart decode `prepare` without re-publishing images (used by A-stage object selection).
+  - `done`: close session.
+- LLM stream: JSON events on `/reasoner/llm_stream` using `std_msgs/String` (`type=reset|append|done|error`, `stage=activity`, optional `text`); Node3_1 forwards to `/llm_output_stream` for Unity display.
+- Camera conflict policy is code-level (`PREFERRED_CAMERA`), default `camera2` priority.
+- LLM settings are code-level constants (`OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT_S`). Fallback activity candidates must remain available when LLM output is missing/invalid.
+
+### Node3_1 reasoner history and undo
+- Appends/publishes history images for staged selections except immediate duplicate re-selections (same stage + same `item_uid` as stack top), which are skipped and directly restart decode `prepare`.
+- Slot `7` undoes the latest action from an action stack: `confirm` -> publish `rollback`; `selection` -> remove matching history item + publish `undo_selection` + send history UDP `delete_last`.
 
 ## Testing Guidelines
-- Test framework: `pytest` with ROS ament linters.
-- Location: each package `test/` directory.
-- Naming: `test_*.py` files and `test_*` functions.
-- For communication-node refactors, at minimum validate `python -m py_compile` on the touched module plus `colcon build --packages-select eeg_processing` from the workspace root.
-- Before PRs, run both package build and `colcon test`; include `colcon test-result --verbose` output when fixing failures.
+- Framework: `pytest` with ROS ament linters (`test_flake8.py`, `test_pep257.py`, `test_copyright.py` in each package `test/`).
+- For communication-node refactors, at minimum validate `python -m py_compile` on the touched module plus `colcon build --packages-select eeg_processing`.
+- Before PRs, run `colcon build` and `colcon test`; include `colcon test-result --verbose` output when fixing failures.
 
 ## Commit & Pull Request Guidelines
-- Current history favors short, focused commit subjects (often concise Chinese/English phrases). Keep one logical change per commit.
-- Preferred commit format: imperative summary, optionally scoped (example: `eeg_processing: refine UDP listener timeout`).
+- Short, focused commit subjects (often concise Chinese/English). One logical change per commit.
+- Preferred format: imperative summary, optionally scoped (example: `eeg_processing: refine UDP listener timeout`).
 - PRs should include: purpose, impacted packages, how to run/verify, and sample logs or screenshots when Unity-facing behavior changes.
 - Link related issue/task IDs and note any parameter/port changes (for example UDP `9999`, TCP `10000`).

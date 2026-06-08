@@ -188,7 +188,7 @@ def loo_evaluate(X_all, y_all, n_components=1):
 
 
 def main():
-    data_path = "data/central_controller_ssvep_node4_test/ssvep4_pretrain_dataset_20260416_151536.npy"
+    data_path = "data/central_controller_ssvep_node4_test/ssvep4_pretrain_dataset_20260416_164519.npy"
 
     print("=" * 80)
     print("eTRCA (FBTRCA) 分析 — 4 trials 训练 + 1 trial 测试")

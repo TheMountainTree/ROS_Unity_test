@@ -1,0 +1,4 @@
+trial_id,target_id,target_frequency_hz,trial_prepared_wall_time,trial_start_wall_time,trial_end_wall_time,planned_duration_s,actual_duration_s,start_trial_id,start_status
+1,7,15.000,2026-05-07T15:09:12.320,2026-05-07T15:09:16.400,2026-05-07T15:09:20.400,4.000,4.000,1,command_sync
+2,1,8.684,2026-05-07T15:09:28.500,2026-05-07T15:09:32.560,2026-05-07T15:09:36.580,4.000,4.020,2,command_sync
+3,2,9.706,2026-05-07T15:09:37.920,2026-05-07T15:09:41.960,2026-05-07T15:09:45.980,4.000,4.020,3,command_sync
