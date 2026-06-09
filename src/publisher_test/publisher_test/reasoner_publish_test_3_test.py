@@ -30,9 +30,9 @@ except Exception:
 PREFERRED_CAMERA = "camera2"  # Switch to "camera1" if needed.
 
 # LLM compatibility config (fill with your own endpoint/credentials).
-OPENAI_BASE_URL = "https://api.siliconflow.cn/v1" # "https://cloud.infini-ai.com/maas/coding/v1"
-OPENAI_API_KEY = "sk-gzzgcanfgcdwxlnwfwrcmtjkwyvuqflwxnwspwxycxrksuyh" # "sk-cp-7udwseww3rks2yfx"
-OPENAI_MODEL = "Pro/moonshotai/Kimi-K2.5" # "kimi-k2.5"
+OPENAI_BASE_URL = 
+OPENAI_API_KEY = 
+OPENAI_MODEL = 
 OPENAI_PROXY_URL = "socks5://127.0.0.1:7897"
 OPENAI_TIMEOUT_S = 60.0
 
